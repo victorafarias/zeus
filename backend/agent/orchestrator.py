@@ -232,8 +232,42 @@ class AgentOrchestrator:
                     
                     tool_args["websocket"] = websocket
 
+                    # Heartbeat task para feedback constante
+                    async def heartbeat(ws):
+                        import asyncio
+                        import random
+                        messages = [
+                            "Ainda processando sua solicitação...",
+                            "O processo continua em execução, aguarde...",
+                            "Executando tarefa complexa...",
+                            "Trabalhando nisso..."
+                        ]
+                        try:
+                            while True:
+                                await asyncio.sleep(15) # A cada 15s
+                                if ws:
+                                    await ws.send_json({
+                                        "type": "status",
+                                        "status": "processing",
+                                        "content": random.choice(messages)
+                                    })
+                        except asyncio.CancelledError:
+                            pass
+
+                    # Iniciar heartbeat
+                    heartbeat_task = asyncio.create_task(heartbeat(websocket)) if websocket else None
+
                     # Executar a tool
-                    result = await execute_tool(tool_name, tool_args)
+                    try:
+                        result = await execute_tool(tool_name, tool_args)
+                    finally:
+                        # Cancelar heartbeat ao terminar
+                        if heartbeat_task:
+                            heartbeat_task.cancel()
+                            try:
+                                await heartbeat_task
+                            except asyncio.CancelledError:
+                                pass
                     
                     logger.info(
                         "Tool executada",
