@@ -122,7 +122,44 @@ Para tarefas longas (downloads, instalações), aumente o timeout."""
         )
         
         try:
-            # Criar processo
+            # Detectar se é um comando em background
+            is_background = (
+                command.strip().endswith('&') or
+                'nohup' in command.lower() or
+                command.strip().endswith('&>')
+            )
+            
+            if is_background:
+                # Para comandos em background, garantir que tenha & no final
+                cmd_to_run = command.strip()
+                if not cmd_to_run.endswith('&'):
+                    cmd_to_run = cmd_to_run + ' &'
+                
+                # Executar e não esperar
+                process = await asyncio.create_subprocess_shell(
+                    cmd_to_run,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=working_dir
+                )
+                
+                # Esperar um pouco para ver se há erro imediato
+                await asyncio.sleep(0.5)
+                
+                # Verificar se o processo ainda está rodando (bom sinal)
+                if process.returncode is None:
+                    logger.info("Processo em background iniciado", pid=process.pid)
+                    return self._success(f"Processo iniciado em background (PID: {process.pid})")
+                else:
+                    # Processo terminou rapidamente - pode ser erro
+                    stdout, stderr = await process.communicate()
+                    stdout_str = stdout.decode('utf-8', errors='replace')
+                    stderr_str = stderr.decode('utf-8', errors='replace')
+                    if process.returncode != 0:
+                        return self._error(f"Erro ao iniciar processo: {stderr_str or stdout_str}")
+                    return self._success(stdout_str or "(processo iniciado)")
+            
+            # Para comandos normais, comportamento padrão
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
