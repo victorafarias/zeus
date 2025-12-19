@@ -34,3 +34,6 @@ structlog>=24.1.0
 
 # Transcrição de áudio/vídeo
 faster-whisper>=0.10.0
+
+# Text-to-Speech
+TTS>=0.22.0

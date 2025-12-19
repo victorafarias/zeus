@@ -178,11 +178,18 @@ class AgentOrchestrator:
             )
             
             # Enviar para o modelo
-            response = await self.client.chat_completion(
-                messages=messages,
-                model=conversation.model_id,
-                tools=self.tools if self.tools else None
-            )
+            try:
+                response = await self.client.chat_completion(
+                    messages=messages,
+                    model=conversation.model_id,
+                    tools=self.tools if self.tools else None
+                )
+            except Exception as e:
+                logger.error("Erro na comunicação com modelo", error=str(e))
+                return {
+                    "content": f"Ocorreu um erro de comunicação com o modelo de IA: {str(e)}. Por favor, tente novamente.",
+                    "role": "assistant"
+                }
             
             # Verificar se há tool calls
             tool_calls = response.get("tool_calls", [])

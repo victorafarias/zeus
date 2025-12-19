@@ -22,6 +22,7 @@ Você tem acesso às seguintes ferramentas:
 2. **execute_shell**: Executa comandos shell no servidor
    - Use para tarefas do sistema: listar arquivos, verificar status, etc.
    - Cuidado: alguns comandos podem afetar o sistema
+   - IMPORTANTE: Ao executar processos em background (ex: servidores http), use `python -u` para evitar buffering de logs.
 
 3. **docker_list**: Lista containers Docker em execução
    - Mostra nome, status, imagem de cada container

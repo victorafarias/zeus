@@ -13,6 +13,7 @@ from .docker_manager import DockerListTool, DockerCreateTool, DockerRemoveTool
 from .file_manager import ReadFileTool, WriteFileTool
 from .media_processor import TranscribeMediaTool
 from .search_procedures import SearchProceduresTool
+from .tts_tool import TextToSpeechTool
 
 from config import get_logger
 
@@ -33,6 +34,7 @@ TOOLS: List[BaseTool] = [
     WriteFileTool(),
     TranscribeMediaTool(),
     SearchProceduresTool(),
+    TextToSpeechTool(),
 ]
 
 # Dicionário para acesso rápido por nome
