@@ -198,11 +198,31 @@ class AgentOrchestrator:
                     tools=self.tools if self.tools else None
                 )
             except Exception as e:
-                logger.error("Erro na comunicação com modelo", error=str(e))
-                return {
-                    "content": f"Ocorreu um erro de comunicação com o modelo de IA: {str(e)}. Por favor, tente novamente.",
-                    "role": "assistant"
-                }
+                # Se usando LLM local e falhou, tentar fallback para OpenRouter
+                if self.use_local:
+                    logger.warning(
+                        "LLM local falhou, tentando fallback para OpenRouter",
+                        error=str(e)
+                    )
+                    try:
+                        fallback_client = get_openrouter_client()
+                        response = await fallback_client.chat_completion(
+                            messages=messages,
+                            model=conversation.model_id,
+                            tools=self.tools if self.tools else None
+                        )
+                    except Exception as fallback_error:
+                        logger.error("Fallback para OpenRouter também falhou", error=str(fallback_error))
+                        return {
+                            "content": f"Erro: LLM local e OpenRouter falharam. Local: {str(e)}. OpenRouter: {str(fallback_error)}",
+                            "role": "assistant"
+                        }
+                else:
+                    logger.error("Erro na comunicação com modelo", error=str(e))
+                    return {
+                        "content": f"Ocorreu um erro de comunicação com o modelo de IA: {str(e)}. Por favor, tente novamente.",
+                        "role": "assistant"
+                    }
             
             # Verificar se há tool calls
             tool_calls = response.get("tool_calls", [])

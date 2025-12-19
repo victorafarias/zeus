@@ -11,6 +11,10 @@ services:
     container_name: zeus-backend
     restart: unless-stopped
 
+    # Permite acesso ao Ollama rodando no host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     # Variáveis de ambiente carregadas do arquivo .env
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
