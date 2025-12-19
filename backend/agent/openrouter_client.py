@@ -143,6 +143,29 @@ class OpenRouterClient:
                     for tc in message.tool_calls
                 ]
             
+            # === LOG DA RESPOSTA ===
+            logger.info(
+                "=== RESPOSTA RECEBIDA ===",
+                model=model,
+                finish_reason=choice.finish_reason
+            )
+            
+            if content:
+                logger.info(
+                    "Conteúdo da Resposta",
+                    content=content[:2000] + "..." if len(content) > 2000 else content,  # Logar conteúdo (truncado se muito grande)
+                    length=len(content)
+                )
+                
+            if message.tool_calls:
+                for i, tc in enumerate(message.tool_calls):
+                    logger.info(
+                        f"Tool Call [{i}]",
+                        name=tc.function.name,
+                        arguments=tc.function.arguments
+                    )
+            logger.info("=== FIM DA RESPOSTA ===")
+            
             logger.info(
                 "Resposta recebida",
                 content_length=len(result["content"]),
