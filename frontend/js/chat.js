@@ -148,11 +148,6 @@ function handleWebSocketMessage(event) {
  * @param {string} content - Conteúdo da mensagem
  */
 function sendMessage(content) {
-    if (!isConnected || !websocket) {
-        console.error('[Chat] WebSocket não conectado');
-        return;
-    }
-
     if (!content.trim()) {
         return;
     }
@@ -162,16 +157,33 @@ function sendMessage(content) {
 
     if (!conversation) {
         // Criar nova conversa se não existir
+        console.log('[Chat] Criando nova conversa...');
         Conversations.createConversation('Nova Conversa', Models.getSelectedModel())
             .then(conv => {
                 if (conv) {
                     Conversations.setCurrentConversation(conv);
+                    // Reconectar WebSocket com ID da conversa
                     connectWebSocket(conv.id);
 
-                    // Aguardar conexão e enviar
-                    setTimeout(() => sendMessage(content), 500);
+                    // Aguardar conexão abrir e enviar
+                    const waitAndSend = () => {
+                        if (isConnected && websocket && websocket.readyState === WebSocket.OPEN) {
+                            sendMessage(content);
+                        } else {
+                            setTimeout(waitAndSend, 100);
+                        }
+                    };
+                    setTimeout(waitAndSend, 200);
                 }
             });
+        return;
+    }
+
+    // Verificar conexão WebSocket
+    if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+        console.log('[Chat] WebSocket não pronto, reconectando...');
+        connectWebSocket(conversation.id);
+        setTimeout(() => sendMessage(content), 500);
         return;
     }
 
@@ -195,6 +207,7 @@ function sendMessage(content) {
         model_id: Models.getSelectedModel()
     };
 
+    console.log('[Chat] Enviando mensagem...');
     websocket.send(JSON.stringify(message));
     console.log('[Chat] Mensagem enviada');
 }
