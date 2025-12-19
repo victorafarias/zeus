@@ -152,12 +152,18 @@ Para tarefas longas (downloads, instalações), aumente o timeout."""
                     return self._success(f"Processo iniciado em background (PID: {process.pid})")
                 else:
                     # Processo terminou rapidamente - pode ser erro
-                    stdout, stderr = await process.communicate()
-                    stdout_str = stdout.decode('utf-8', errors='replace')
-                    stderr_str = stderr.decode('utf-8', errors='replace')
-                    if process.returncode != 0:
-                        return self._error(f"Erro ao iniciar processo: {stderr_str or stdout_str}")
-                    return self._success(stdout_str or "(processo iniciado)")
+                    try:
+                        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=2.0)
+                        stdout_str = stdout.decode('utf-8', errors='replace')
+                        stderr_str = stderr.decode('utf-8', errors='replace')
+                        if process.returncode != 0:
+                            return self._error(f"Erro ao iniciar processo: {stderr_str or stdout_str}")
+                        return self._success(stdout_str or "(processo iniciado)")
+                    except asyncio.TimeoutError:
+                        # Se der timeout, assumimos que o processo está rodando e segurando as pipes
+                        # Isso é comum com nohup/background
+                        logger.info("Timeout ao ler saída inicial de processo background (provavelmente OK)")
+                        return self._success(f"Processo iniciado em background (PID: {process.pid}) - Saída não capturada imediatamente")
             
             # Para comandos normais, comportamento padrão
             process = await asyncio.create_subprocess_shell(
