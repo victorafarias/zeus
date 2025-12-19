@@ -33,6 +33,12 @@ function connectWebSocket(conversationId = null) {
         return;
     }
 
+    // Se já está conectado com a mesma conversa, não reconectar
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+        console.log('[Chat] WebSocket já conectado');
+        return;
+    }
+
     // Fechar conexão existente
     if (websocket) {
         websocket.close();
@@ -46,7 +52,7 @@ function connectWebSocket(conversationId = null) {
         wsUrl += `&conversation_id=${conversationId}`;
     }
 
-    console.log('[Chat] Conectando WebSocket...');
+    console.log('[Chat] Conectando WebSocket...', conversationId || 'nova conversa');
     updateConnectionStatus('connecting');
 
     websocket = new WebSocket(wsUrl);
@@ -61,14 +67,7 @@ function connectWebSocket(conversationId = null) {
         console.log('[Chat] WebSocket desconectado', event.code);
         isConnected = false;
         updateConnectionStatus('disconnected');
-
-        // Tentar reconectar após 3 segundos
-        setTimeout(() => {
-            if (!isConnected) {
-                const conv = Conversations.getCurrentConversation();
-                connectWebSocket(conv?.id);
-            }
-        }, 3000);
+        // Não reconectar automaticamente - será reconectado quando necessário
     };
 
     websocket.onerror = (error) => {
