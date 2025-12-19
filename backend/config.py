@@ -56,14 +56,14 @@ class Settings(BaseSettings):
     local_llm_base_url: str = "http://ollama:11434/v1"
     local_llm_model: str = "llama3.2:3b"
     local_llm_api_key: str = "ollama"
-    local_llm_timeout: int = 60  # segundos
+    local_llm_timeout: int = 120  # segundos
     
     # -------------------------------------------------
-    # Autenticação
+    # Autenticação (valores devem vir do .env)
     # -------------------------------------------------
-    auth_username: str = "victor"
-    auth_password: str = "V!ct0rf@"
-    secret_key: str = "development-secret-key-change-in-production"
+    auth_username: str = ""
+    auth_password: str = ""
+    secret_key: str = ""
     
     # Configurações JWT
     jwt_algorithm: str = "HS256"
