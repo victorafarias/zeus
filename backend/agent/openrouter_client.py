@@ -84,6 +84,23 @@ class OpenRouterClient:
                 params["tools"] = tools
                 params["tool_choice"] = "auto"
             
+            # Log detalhado do prompt sendo enviado
+            logger.info(
+                "=== PROMPT ENVIADO PARA OPENROUTER ===",
+                model=model
+            )
+            for i, msg in enumerate(messages):
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                # Truncar conteúdo muito longo para o log
+                content_preview = content[:500] + "..." if len(content) > 500 else content
+                logger.info(
+                    f"Mensagem [{i}]",
+                    role=role,
+                    content=content_preview
+                )
+            logger.info("=== FIM DO PROMPT ===")
+            
             # Fazer requisição
             response = await self.client.chat.completions.create(**params)
             

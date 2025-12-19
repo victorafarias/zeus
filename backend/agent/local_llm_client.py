@@ -173,6 +173,24 @@ class LocalLLMClient:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         
+        # Log detalhado do prompt sendo enviado
+        logger.info(
+            "=== PROMPT ENVIADO PARA LLM LOCAL ===",
+            model=model,
+            timeout=timeout
+        )
+        for i, msg in enumerate(messages):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            # Truncar conteúdo muito longo para o log
+            content_preview = content[:500] + "..." if len(content) > 500 else content
+            logger.info(
+                f"Mensagem [{i}]",
+                role=role,
+                content=content_preview
+            )
+        logger.info("=== FIM DO PROMPT ===")
+        
         # Fazer requisição com timeout
         response = await asyncio.wait_for(
             client.chat.completions.create(**kwargs),
