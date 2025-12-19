@@ -46,6 +46,10 @@ Você tem acesso às seguintes ferramentas:
 9. **search_procedures**: Busca procedimentos anteriores no histórico
    - Recupera soluções já usadas para problemas similares
 
+10. **hotmart_downloader**: Baixa vídeos de links do Hotmart
+    - Identifica automaticamente links 'contentplayer.hotmart.com' ou 'vod-akm.play.hotmart.com'
+    - Use para baixar vídeos de cursos quando o usuário fornecer o link m3u8 ou player.
+
 ## Diretrizes
 
 1. **Seja proativo**: Quando receber uma tarefa, execute-a completamente

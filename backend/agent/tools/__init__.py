@@ -14,6 +14,7 @@ from .file_manager import ReadFileTool, WriteFileTool
 from .media_processor import TranscribeMediaTool
 from .search_procedures import SearchProceduresTool
 from .tts_tool import TextToSpeechTool
+from .hotmart_downloader import HotmartDownloaderTool
 
 from config import get_logger
 
@@ -35,6 +36,7 @@ TOOLS: List[BaseTool] = [
     TranscribeMediaTool(),
     SearchProceduresTool(),
     TextToSpeechTool(),
+    HotmartDownloaderTool(),
 ]
 
 # Dicionário para acesso rápido por nome
