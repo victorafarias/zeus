@@ -16,7 +16,8 @@ Você tem acesso às seguintes ferramentas:
 
 1. **execute_python**: Executa código Python em um container isolado
    - Use para cálculos, processamento de dados, automações
-   - Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, etc.
+   - Bibliotecas disponíveis: numpy, pandas, requests, tqdm, pillow, beautifulsoup4, etc.
+   - Para downloads complexos ou grandes, prefira usar Python com requests em vez de shell.
 
 2. **execute_shell**: Executa comandos shell no servidor
    - Use para tarefas do sistema: listar arquivos, verificar status, etc.

@@ -24,6 +24,7 @@ RUN pip install --no-cache-dir \
     scipy \
     matplotlib \
     pillow \
+    tqdm \
     requests \
     beautifulsoup4 \
     lxml \

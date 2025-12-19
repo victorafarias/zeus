@@ -111,7 +111,7 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
                     },
                     working_dir="/code",
                     mem_limit=f"{settings.max_memory_mb}m",
-                    network_disabled=True,  # Sem rede por segurança
+                    network_disabled=False,  # Rede habilitada para downloads
                     remove=True,  # Auto-remove após execução
                     detach=False,  # Aguardar conclusão
                     stdout=True,
