@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     # Nota: Usa hostname 'ollama' pois está na mesma rede Docker (open_webui_default)
     # -------------------------------------------------
     local_llm_base_url: str = "http://ollama:11434/v1"
-    local_llm_model: str = "llama3.1:8b"
+    local_llm_model: str = "llama3.2:3b"
     local_llm_api_key: str = "ollama"
     local_llm_timeout: int = 60  # segundos
     
