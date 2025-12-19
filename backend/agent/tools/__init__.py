@@ -15,6 +15,7 @@ from .media_processor import TranscribeMediaTool
 from .search_procedures import SearchProceduresTool
 from .tts_tool import TextToSpeechTool
 from .hotmart_downloader import HotmartDownloaderTool
+from .external_model_tool import ExternalModelTool
 
 from config import get_logger
 
@@ -37,6 +38,7 @@ TOOLS: List[BaseTool] = [
     SearchProceduresTool(),
     TextToSpeechTool(),
     HotmartDownloaderTool(),
+    ExternalModelTool(),
 ]
 
 # Dicionário para acesso rápido por nome

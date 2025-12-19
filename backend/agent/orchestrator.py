@@ -11,7 +11,8 @@ import json
 import asyncio
 
 from config import get_settings, get_logger
-from agent.openrouter_client import get_openrouter_client
+from agent.local_llm_client import LocalLLMClient
+from agent.openrouter_client import get_openrouter_client  # Fallback
 from agent.prompts import SYSTEM_PROMPT, RAG_CONTEXT_TEMPLATE
 from agent.tools import get_all_tools, execute_tool
 
@@ -42,19 +43,31 @@ class AgentOrchestrator:
     Orquestrador principal do agente Zeus.
     
     Gerencia:
-    - Comunicação com OpenRouter
+    - Comunicação com LLM local (Llama 3.1 via Ollama)
+    - Fallback para OpenRouter se LLM local indisponível
     - Execução de tools
     - Ciclo de tool calling (múltiplas iterações)
-    - Streaming de respostas
     """
     
     def __init__(self):
-        """Inicializa o orquestrador"""
-        self.client = get_openrouter_client()
+        """Inicializa o orquestrador com LLM local"""
+        # Tentar usar LLM local primeiro
+        self.use_local = True
+        try:
+            self.local_client = LocalLLMClient()
+            self.client = self.local_client
+            logger.info("Usando LLM local (Ollama)")
+        except Exception as e:
+            logger.warning("LLM local indisponível, usando OpenRouter", error=str(e))
+            self.local_client = None
+            self.client = get_openrouter_client()
+            self.use_local = False
+        
         self.tools = get_all_tools()
         
         logger.info(
             "Orquestrador inicializado",
+            use_local=self.use_local,
             tools_count=len(self.tools)
         )
     

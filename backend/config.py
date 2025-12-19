@@ -44,10 +44,18 @@ class Settings(BaseSettings):
     """
     
     # -------------------------------------------------
-    # OpenRouter API
+    # OpenRouter API (usado como fallback ou para tarefas complexas)
     # -------------------------------------------------
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    
+    # -------------------------------------------------
+    # Local LLM (Ollama - Orquestrador Principal)
+    # -------------------------------------------------
+    local_llm_base_url: str = "http://localhost:11434/v1"
+    local_llm_model: str = "llama3.1:8b"
+    local_llm_api_key: str = "ollama"
+    local_llm_timeout: int = 60  # segundos
     
     # -------------------------------------------------
     # Autenticação
