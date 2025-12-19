@@ -56,7 +56,11 @@ class AgentOrchestrator:
         try:
             self.local_client = LocalLLMClient()
             self.client = self.local_client
-            logger.info("Usando LLM local (Ollama)")
+            logger.info(
+                "Usando LLM local (Ollama)",
+                primary_model=settings.primary_llm_model,
+                secondary_model=settings.secondary_llm_model
+            )
         except Exception as e:
             logger.warning("LLM local indisponível, usando OpenRouter", error=str(e))
             self.local_client = None
@@ -211,7 +215,10 @@ class AgentOrchestrator:
             
             # Enviar para o modelo
             if self.use_local:
-                await self._send_log_feedback(websocket, "Enviando para LLM local")
+                await self._send_log_feedback(
+                    websocket, 
+                    f"Enviando para LLM local ({settings.primary_llm_model})"
+                )
             else:
                 await self._send_log_feedback(websocket, "Enviando para OpenRouter")
             
@@ -222,15 +229,21 @@ class AgentOrchestrator:
                     tools=self.tools if self.tools else None
                 )
             except Exception as e:
-                # Se usando LLM local e falhou, tentar fallback para OpenRouter
+                # Se usando LLM local e falhou (ambos Gemma e Llama), tentar fallback para OpenRouter
                 if self.use_local:
                     logger.warning(
-                        "LLM local falhou, tentando fallback para OpenRouter",
+                        "LLMs locais falharam (Gemma e Llama), tentando fallback para OpenRouter",
                         error=str(e)
                     )
-                    await self._send_log_feedback(websocket, "LLM local falhou, tentando fallback para OpenRouter")
+                    await self._send_log_feedback(
+                        websocket, 
+                        f"LLMs locais ({settings.primary_llm_model} e {settings.secondary_llm_model}) falharam, tentando OpenRouter"
+                    )
                     try:
-                        await self._send_log_feedback(websocket, "Enviando para OpenRouter")
+                        await self._send_log_feedback(
+                            websocket, 
+                            f"Enviando para OpenRouter ({conversation.model_id})"
+                        )
                         fallback_client = get_openrouter_client()
                         response = await fallback_client.chat_completion(
                             messages=messages,
@@ -241,7 +254,9 @@ class AgentOrchestrator:
                         logger.error("Fallback para OpenRouter também falhou", error=str(fallback_error))
                         await self._send_log_feedback(websocket, "Erro: OpenRouter também falhou")
                         return {
-                            "content": f"Erro: LLM local e OpenRouter falharam. Local: {str(e)}. OpenRouter: {str(fallback_error)}",
+                            "content": f"Erro: Todos os modelos falharam. "
+                                      f"{settings.primary_llm_model} e {settings.secondary_llm_model}: {str(e)}. "
+                                      f"OpenRouter: {str(fallback_error)}",
                             "role": "assistant"
                         }
                 else:

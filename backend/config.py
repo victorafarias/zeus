@@ -54,9 +54,15 @@ class Settings(BaseSettings):
     # Nota: Usa hostname 'ollama' pois está na mesma rede Docker (open_webui_default)
     # -------------------------------------------------
     local_llm_base_url: str = "http://ollama:11434/v1"
-    local_llm_model: str = "llama3.2:3b"
     local_llm_api_key: str = "ollama"
-    local_llm_timeout: int = 120  # segundos
+    
+    # Modelo Primário: Gemma 3 4B (3 minutos timeout)
+    primary_llm_model: str = "gemma3:4b"
+    primary_llm_timeout: int = 180  # segundos (3 minutos)
+    
+    # Modelo Secundário: Llama3.2 (5 minutos timeout)
+    secondary_llm_model: str = "llama3.2:3b"
+    secondary_llm_timeout: int = 300  # segundos (5 minutos)
     
     # -------------------------------------------------
     # Autenticação (valores devem vir do .env)
