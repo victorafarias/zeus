@@ -135,6 +135,62 @@ class AgentOrchestrator:
             except Exception:
                 pass  # Ignorar erros de envio
     
+    async def _call_model_with_retry(self, model, messages, tools, timeout):
+        """
+        Tenta chamar o modelo, com retry se a resposta for vazia/erro de modelo vazio.
+        Retorna a resposta ou None se falhar todas tentativas.
+        """
+        max_attempts = 2
+        
+        for attempt in range(max_attempts):
+            try:
+                is_last_attempt = (attempt == max_attempts - 1)
+                
+                # Tentar chamar o modelo
+                response = await asyncio.wait_for(
+                    self.client.chat_completion(
+                        messages=messages,
+                        model=model,
+                        tools=tools
+                    ),
+                    timeout=timeout
+                )
+                
+                # Verificar se resposta é válida
+                content = response.get("content", "")
+                tool_calls = response.get("tool_calls")
+                
+                # Erro específico retornado pelo client quando modelo openrouter falha silenciosamente
+                is_empty_error = isinstance(content, str) and "Erro: O modelo retornou uma resposta vazia" in content
+                
+                if (content or tool_calls) and not is_empty_error:
+                    # Sucesso! Resposta válida
+                    return response
+                
+                # Se chegou aqui, é resposta vazia/ruim
+                logger.warning(
+                    f"Resposta inválida/vazia do modelo {model}",
+                    attempt=attempt+1,
+                    content_preview=str(content)[:100]
+                )
+                
+                if not is_last_attempt:
+                    logger.info(f"Tentando novamente {model} em 1s...")
+                    await asyncio.sleep(1)
+                    continue
+                
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout no modelo {model} (tentativa {attempt+1})")
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(1)
+                    
+            except Exception as e:
+                logger.error(f"Erro no modelo {model} (tentativa {attempt+1}): {e}")
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(1)
+        
+        return None # Falhou todas as tentativas
+
     async def process_message(
         self,
         conversation,
@@ -210,83 +266,43 @@ class AgentOrchestrator:
                 f"Enviando para modelo primário ({self.primary_model})"
             )
             
-            response = None
+            # Tentar modelo primário (com retry interno)
+            response = await self._call_model_with_retry(
+                model=self.primary_model,
+                messages=messages,
+                tools=self.tools if self.tools else None,
+                timeout=self.primary_timeout
+            )
             
-            # Tentar modelo primário
-            try:
-                response = await asyncio.wait_for(
-                    self.client.chat_completion(
-                        messages=messages,
-                        model=self.primary_model,
-                        tools=self.tools if self.tools else None
-                    ),
-                    timeout=self.primary_timeout
-                )
+            if response:
                 logger.info("Resposta do modelo primário recebida", model=self.primary_model)
-                
-            except asyncio.TimeoutError:
+            else:
+                # Falha no primário -> Tentar secundário
                 logger.warning(
-                    "Timeout no modelo primário, tentando secundário",
-                    primary_model=self.primary_model,
-                    timeout=self.primary_timeout
-                )
-                await self._send_log_feedback(
-                    websocket,
-                    f"Timeout em {self.primary_model}, tentando {self.secondary_model}"
-                )
-                
-            except Exception as e:
-                logger.warning(
-                    "Erro no modelo primário, tentando secundário",
-                    primary_model=self.primary_model,
-                    error=str(e)
+                    "Falha no modelo primário, tentando secundário",
+                    primary_model=self.primary_model
                 )
                 await self._send_log_feedback(
                     websocket,
                     f"Erro em {self.primary_model}, tentando {self.secondary_model}"
                 )
-            
-            # Se primário falhou, tentar secundário
-            if response is None:
-                try:
-                    await self._send_log_feedback(
-                        websocket,
-                        f"Enviando para modelo secundário ({self.secondary_model})"
-                    )
-                    
-                    response = await asyncio.wait_for(
-                        self.client.chat_completion(
-                            messages=messages,
-                            model=self.secondary_model,
-                            tools=self.tools if self.tools else None
-                        ),
-                        timeout=self.secondary_timeout
-                    )
+                
+                response = await self._call_model_with_retry(
+                    model=self.secondary_model,
+                    messages=messages,
+                    tools=self.tools if self.tools else None,
+                    timeout=self.secondary_timeout
+                )
+                
+                if response:
                     logger.info("Resposta do modelo secundário recebida", model=self.secondary_model)
-                    
-                except asyncio.TimeoutError:
-                    logger.error(
-                        "Timeout no modelo secundário também",
-                        secondary_model=self.secondary_model,
-                        timeout=self.secondary_timeout
-                    )
-                    await self._send_log_feedback(websocket, "Erro: Timeout em todos os modelos")
-                    return {
-                        "content": f"Erro: Ambos os modelos não responderam a tempo. "
-                                  f"{self.primary_model} ({self.primary_timeout}s) e "
-                                  f"{self.secondary_model} ({self.secondary_timeout}s)",
-                        "role": "assistant"
-                    }
-                    
-                except Exception as e:
-                    logger.error(
-                        "Erro no modelo secundário também",
-                        secondary_model=self.secondary_model,
-                        error=str(e)
-                    )
+                else:
+                    # Falha total
+                    error_msg = f"Erro: Ambos os modelos ({self.primary_model}, {self.secondary_model}) falharam em responder."
+                    logger.error("Falha em todos os modelos")
                     await self._send_log_feedback(websocket, "Erro: Falha em todos os modelos")
                     return {
-                        "content": f"Erro: Ambos os modelos falharam. Erro: {str(e)}",
+                        "content": error_msg,
                         "role": "assistant"
                     }
             
