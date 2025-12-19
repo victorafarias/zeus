@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     
     # Modelo Secundário: OpenAI GPT-4o-mini (5 minutos timeout)
     # Fallback caso o primário falhe
-    secondary_model: str = "openai/gpt-oss-120b"
+    secondary_model: str = "openai/gpt-4.1-nano"
     secondary_model_timeout: int = 300  # segundos (5 minutos)
     
     # -------------------------------------------------

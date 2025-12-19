@@ -112,8 +112,19 @@ class OpenRouterClient:
             choice = response.choices[0]
             message = choice.message
             
+            content = message.content or ""
+            
+            # Verificar se resposta é vazia e sem tools (erro comum com modelos inválidos)
+            if not content and not message.tool_calls:
+                logger.warning(
+                    "Resposta do modelo vazia e sem tool calls",
+                    model=model,
+                    finish_reason=choice.finish_reason
+                )
+                content = "Erro: O modelo retornou uma resposta vazia. Verifique se o nome do modelo está correto."
+            
             result = {
-                "content": message.content or "",
+                "content": content,
                 "role": message.role,
                 "finish_reason": choice.finish_reason
             }
