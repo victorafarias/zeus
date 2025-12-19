@@ -481,6 +481,10 @@ function initChat() {
     typingIndicator = document.getElementById('typing-indicator');
     connectionStatus = document.getElementById('connection-status');
 
+    // Garantir que modais estejam escondidos ao iniciar
+    hideToolModal();
+    hideTypingIndicator();
+
     // Formulário de mensagem
     const messageForm = document.getElementById('message-form');
     if (messageForm) {
