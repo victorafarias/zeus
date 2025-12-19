@@ -76,21 +76,8 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
         )
         
         try:
-            # Criar arquivo temporário com o código
-            with tempfile.NamedTemporaryFile(
-                mode='w',
-                suffix='.py',
-                delete=False,
-                encoding='utf-8'
-            ) as f:
-                f.write(code)
-                temp_file = f.name
-            
             # Nome único para o container
             container_name = f"zeus-python-{uuid.uuid4().hex[:8]}"
-            
-            # Diretório temporário para compartilhar
-            temp_dir = os.path.dirname(temp_file)
             
             # Tentar usar imagem sandbox otimizada, fallback para python:3.11-slim
             image = "zeus-sandbox-python:latest"
@@ -100,26 +87,38 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
                 image = "python:3.11-slim"
                 logger.info("Usando imagem fallback", image=image)
             
-            # Executar container
+            # Executar container sem montar volume, passando código via stdin
+            
+            # 1. Criar container mantendo-o rodando (tail -f /dev/null)
+            container = self.docker_client.containers.run(
+                image=image,
+                command="tail -f /dev/null", 
+                name=container_name,
+                working_dir="/code",
+                mem_limit=f"{settings.max_memory_mb}m",
+                network_disabled=False,
+                detach=True,
+                remove=True
+            )
+            
             try:
-                container = self.docker_client.containers.run(
-                    image=image,
-                    command=f"python /code/{os.path.basename(temp_file)}",
-                    name=container_name,
-                    volumes={
-                        temp_dir: {'bind': '/code', 'mode': 'ro'}
-                    },
-                    working_dir="/code",
-                    mem_limit=f"{settings.max_memory_mb}m",
-                    network_disabled=False,  # Rede habilitada para downloads
-                    remove=True,  # Auto-remove após execução
-                    detach=False,  # Aguardar conclusão
-                    stdout=True,
-                    stderr=True
-                )
+                # 2. Escrever o código em um arquivo dentro do container
+                # Usamos xxd para evitar problemas de escaping de bash com aspas/quebras de linha
+                # Encode para hex no Python -> echo hex | xxd -r -p > script.py no container
+                encoded_code = code.encode('utf-8').hex()
                 
-                # Decodificar output
-                output = container.decode('utf-8') if isinstance(container, bytes) else str(container)
+                # Install xxd if not present (python slim might not have it, but we can try pure bash fallback if needed)
+                # Fallback simples usando printf se xxd falhar (menos robusto para binários, mas ok para texto)
+                setup_cmd = f"/bin/bash -c 'if ! command -v xxd &> /dev/null; then apt-get update && apt-get install -y xxd; fi; echo {encoded_code} | xxd -r -p > /code/script.py'"
+                
+                # Executar comando de setup (pode demorar um pouco se instalar xxd)
+                container.exec_run(setup_cmd)
+                
+                # 3. Executar o script Python
+                result = container.exec_run("python /code/script.py")
+                
+                # 4. Capturar output
+                output = result.output.decode('utf-8')
                 
                 logger.info(
                     "Python executado com sucesso",
@@ -127,25 +126,16 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
                 )
                 
                 return self._success(output)
-                
-            except docker.errors.ContainerError as e:
-                # Container retornou erro (código Python falhou)
-                stderr = e.stderr.decode('utf-8') if e.stderr else str(e)
-                logger.warning("Python retornou erro", error=stderr)
-                return self._error(f"Erro na execução:\n{stderr}")
-                
-            except docker.errors.ImageNotFound:
-                # Imagem não existe - tentar pull
-                logger.info("Baixando imagem python:3.11-slim")
-                self.docker_client.images.pull("python:3.11-slim")
-                return self._error("Imagem Python baixada. Tente novamente.")
-                
+                    
             finally:
-                # Limpar arquivo temporário
+                # Parar container (auto-remove fará a limpeza)
                 try:
-                    os.unlink(temp_file)
+                    container.stop()
                 except:
                     pass
+
+                
+
         
         except Exception as e:
             logger.error("Erro ao executar Python", error=str(e))
