@@ -88,6 +88,32 @@ function connectWebSocket(conversationId = null) {
 
 
 /**
+ * Atualiza logs da tool em execução
+ * @param {string} output - Texto do log
+ */
+function updateToolLog(output) {
+    const logsContainer = document.querySelector('.tool-logs-container');
+    const logsPre = document.getElementById('tool-logs');
+
+    if (logsContainer && logsPre) {
+        logsContainer.style.display = 'block';
+        logsPre.textContent += output;
+        // Auto scroll
+        logsContainer.scrollTop = logsContainer.scrollHeight;
+    }
+
+    // Mostrar última linha no indicador de digitação para feedback imediato
+    const lines = output.split('\n').filter(line => line.trim());
+    if (lines.length > 0) {
+        const lastLine = lines[lines.length - 1];
+        // Limitar tamanho
+        const truncated = lastLine.length > 50 ? lastLine.substring(0, 47) + '...' : lastLine;
+        showTypingIndicator(truncated);
+    }
+}
+
+
+/**
  * Processa mensagem recebida do WebSocket
  * @param {MessageEvent} event - Evento de mensagem
  */
@@ -137,41 +163,13 @@ function handleWebSocketMessage(event) {
 
             case 'backend_log':
                 // Exibe descrição do log do backend no indicador de digitação
+                console.log('[Chat] Backend log:', data.message);
                 showTypingIndicator(data.message);
                 break;
 
             case 'error':
-                // ... (resto do código)
-
-                // ...
-
-                /**
-                 * Atualiza logs da tool em execução
-                 * @param {string} output - Texto do log
-                 */
-                function updateToolLog(output) {
-                    const logsContainer = document.querySelector('.tool-logs-container');
-                    const logsPre = document.getElementById('tool-logs');
-
-                    if (logsContainer && logsPre) {
-                        logsContainer.style.display = 'block';
-                        logsPre.textContent += output;
-                        // Auto scroll
-                        logsContainer.scrollTop = logsContainer.scrollHeight;
-                    }
-
-                    // Mostrar última linha no indicador de digitação para feedback imediato
-                    const lines = output.split('\n').filter(line => line.trim());
-                    if (lines.length > 0) {
-                        const lastLine = lines[lines.length - 1];
-                        // Limitar tamanho
-                        const truncated = lastLine.length > 50 ? lastLine.substring(0, 47) + '...' : lastLine;
-                        showTypingIndicator(truncated);
-                    }
-                }
-
                 hideTypingIndicator();
-                hideToolModal(); // Garantir que modal está fechado
+                hideToolModal();
                 addMessage('system', `❌ ${data.content}`);
                 isProcessing = false;
                 enableInput();

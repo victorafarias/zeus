@@ -160,6 +160,9 @@ class LocalLLMClient:
             asyncio.TimeoutError: Se exceder timeout
             Exception: Para outros erros
         """
+        # Verificar se é modelo gemma3-tools (retorna tool calls como texto)
+        is_gemma_tools = "gemma3-tools" in model.lower()
+        
         # Preparar argumentos
         kwargs = {
             "model": model,
@@ -168,8 +171,9 @@ class LocalLLMClient:
             "max_tokens": max_tokens
         }
         
-        # Adicionar tools se fornecidas
-        if tools:
+        # Para gemma3-tools, NÃO enviamos tools via API
+        # O modelo recebe as tools no system prompt e retorna JSON como texto
+        if tools and not is_gemma_tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         
@@ -177,7 +181,8 @@ class LocalLLMClient:
         logger.info(
             "=== PROMPT ENVIADO PARA LLM LOCAL ===",
             model=model,
-            timeout=timeout
+            timeout=timeout,
+            is_gemma_tools=is_gemma_tools
         )
         for i, msg in enumerate(messages):
             role = msg.get("role", "unknown")
@@ -200,15 +205,28 @@ class LocalLLMClient:
         # Extrair resposta
         choice = response.choices[0]
         message = choice.message
+        content = message.content or ""
         
         # Formatar resposta
         result = {
-            "content": message.content or "",
+            "content": content,
             "role": "assistant"
         }
         
-        # Processar tool calls se existirem
-        if message.tool_calls:
+        # Para gemma3-tools, parsear tool calls do texto
+        if is_gemma_tools and tools:
+            parsed_tool_calls = self._parse_tool_calls_from_text(content, tools)
+            if parsed_tool_calls:
+                result["tool_calls"] = parsed_tool_calls
+                # Limpar o JSON do conteúdo se encontrou tool calls
+                result["content"] = ""
+                logger.info(
+                    "Tool calls parseados do texto",
+                    count=len(parsed_tool_calls)
+                )
+        
+        # Processar tool calls nativos se existirem (para outros modelos)
+        elif message.tool_calls:
             result["tool_calls"] = [
                 {
                     "id": tc.id,
@@ -222,6 +240,69 @@ class LocalLLMClient:
             ]
         
         return result
+    
+    def _parse_tool_calls_from_text(
+        self,
+        content: str,
+        available_tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Parseia tool calls do texto da resposta do modelo gemma3-tools.
+        
+        O formato esperado é:
+        {"name": "tool_name", "parameters": {"param_name": "value"}}
+        
+        Args:
+            content: Texto da resposta do modelo
+            available_tools: Lista de tools disponíveis
+            
+        Returns:
+            Lista de tool calls no formato padrão
+        """
+        import json
+        import re
+        import uuid
+        
+        tool_calls = []
+        
+        # Extrair nomes das tools disponíveis
+        available_tool_names = set()
+        for tool in available_tools:
+            if tool.get("type") == "function":
+                available_tool_names.add(tool["function"]["name"])
+        
+        # Tentar encontrar JSON no texto
+        # Padrão: {"name": "...", "parameters": {...}}
+        json_pattern = r'\{[^{}]*"name"\s*:\s*"[^"]+"\s*,\s*"parameters"\s*:\s*\{[^{}]*\}[^{}]*\}'
+        
+        matches = re.findall(json_pattern, content, re.DOTALL)
+        
+        for match in matches:
+            try:
+                parsed = json.loads(match)
+                tool_name = parsed.get("name", "")
+                parameters = parsed.get("parameters", {})
+                
+                # Verificar se é uma tool válida
+                if tool_name in available_tool_names:
+                    tool_calls.append({
+                        "id": f"call_{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": json.dumps(parameters)
+                        }
+                    })
+                    logger.debug(
+                        "Tool call parseado",
+                        name=tool_name,
+                        parameters=list(parameters.keys())
+                    )
+            except json.JSONDecodeError as e:
+                logger.debug("Falha ao parsear JSON", match=match[:100], error=str(e))
+                continue
+        
+        return tool_calls
     
     async def chat_completion(
         self,

@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     local_llm_api_key: str = "ollama"
     
     # Modelo Primário: Gemma 3 4B Tools (3 minutos timeout) - Variante com suporte a tools
-    primary_llm_model: str = "orieg/gemma3-tools:4b"
+    primary_llm_model: str = "orieg/gemma3-tools:4b-it-qat"
     primary_llm_timeout: int = 180  # segundos (3 minutos)
     
     # Modelo Secundário: Llama3.2 (5 minutos timeout)
