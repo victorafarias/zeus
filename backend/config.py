@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     # -------------------------------------------------
     
     # Modelo Primário: Google Gemma 3 27B (3 minutos timeout)
-    primary_model: str = "google/gemma-3-27b-it"
+    primary_model: str = "openai/gpt-5-nano"
     primary_model_timeout: int = 180  # segundos (3 minutos)
     
     # Modelo Secundário: OpenAI GPT-4o-mini (5 minutos timeout)
