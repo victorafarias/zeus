@@ -122,6 +122,24 @@ class AgentOrchestrator:
         
         return messages
     
+    async def _send_log_feedback(self, websocket: Optional[WebSocket], message: str):
+        """
+        Envia feedback de log para o frontend via WebSocket.
+        Exibe a descrição do log no indicador de digitação.
+        
+        Args:
+            websocket: Conexão WebSocket (pode ser None)
+            message: Mensagem de log a exibir
+        """
+        if websocket:
+            try:
+                await websocket.send_json({
+                    "type": "backend_log",
+                    "message": message
+                })
+            except Exception:
+                pass  # Ignorar erros de envio
+    
     async def process_message(
         self,
         conversation,
@@ -189,8 +207,14 @@ class AgentOrchestrator:
                 iteration=iteration,
                 messages_count=len(messages)
             )
+            await self._send_log_feedback(websocket, f"Iteração do agente ({iteration})")
             
             # Enviar para o modelo
+            if self.use_local:
+                await self._send_log_feedback(websocket, "Enviando para LLM local")
+            else:
+                await self._send_log_feedback(websocket, "Enviando para OpenRouter")
+            
             try:
                 response = await self.client.chat_completion(
                     messages=messages,
@@ -204,7 +228,9 @@ class AgentOrchestrator:
                         "LLM local falhou, tentando fallback para OpenRouter",
                         error=str(e)
                     )
+                    await self._send_log_feedback(websocket, "LLM local falhou, tentando fallback para OpenRouter")
                     try:
+                        await self._send_log_feedback(websocket, "Enviando para OpenRouter")
                         fallback_client = get_openrouter_client()
                         response = await fallback_client.chat_completion(
                             messages=messages,
@@ -213,16 +239,21 @@ class AgentOrchestrator:
                         )
                     except Exception as fallback_error:
                         logger.error("Fallback para OpenRouter também falhou", error=str(fallback_error))
+                        await self._send_log_feedback(websocket, "Erro: OpenRouter também falhou")
                         return {
                             "content": f"Erro: LLM local e OpenRouter falharam. Local: {str(e)}. OpenRouter: {str(fallback_error)}",
                             "role": "assistant"
                         }
                 else:
                     logger.error("Erro na comunicação com modelo", error=str(e))
+                    await self._send_log_feedback(websocket, "Erro na comunicação com modelo")
                     return {
                         "content": f"Ocorreu um erro de comunicação com o modelo de IA: {str(e)}. Por favor, tente novamente.",
                         "role": "assistant"
                     }
+            
+            # Resposta recebida
+            await self._send_log_feedback(websocket, "Resposta recebida")
             
             # Verificar se há tool calls
             tool_calls = response.get("tool_calls", [])
@@ -233,6 +264,7 @@ class AgentOrchestrator:
                     "Resposta final",
                     content_length=len(response.get("content", ""))
                 )
+                await self._send_log_feedback(websocket, "Resposta final gerada")
                 return response
             
             # Executar cada tool call
@@ -240,6 +272,7 @@ class AgentOrchestrator:
                 "Executando tools",
                 count=len(tool_calls)
             )
+            await self._send_log_feedback(websocket, f"Executando {len(tool_calls)} ferramenta(s)")
             
             # Adicionar resposta do assistente com tool_calls às mensagens
             messages.append({
@@ -270,6 +303,7 @@ class AgentOrchestrator:
                         name=tool_name,
                         args=list(tool_args.keys())
                     )
+                    await self._send_log_feedback(websocket, f"Executando: {tool_name}")
                     
                     tool_args["websocket"] = websocket
 
@@ -320,8 +354,10 @@ class AgentOrchestrator:
                     # Formatar resultado
                     if result.get("success"):
                         tool_result = result.get("output", "Executado com sucesso")
+                        await self._send_log_feedback(websocket, f"Tool {tool_name} executada com sucesso")
                     else:
                         tool_result = f"Erro: {result.get('error', 'Erro desconhecido')}"
+                        await self._send_log_feedback(websocket, f"Erro na tool {tool_name}")
                     
                 except json.JSONDecodeError as e:
                     tool_result = f"Erro ao parsear argumentos: {str(e)}"

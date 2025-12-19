@@ -135,6 +135,11 @@ function handleWebSocketMessage(event) {
                 hideToolModal();
                 break;
 
+            case 'backend_log':
+                // Exibe descrição do log do backend no indicador de digitação
+                showTypingIndicator(data.message);
+                break;
+
             case 'error':
                 // ... (resto do código)
 

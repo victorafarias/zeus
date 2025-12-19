@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional
 from .base import BaseTool
 from .python_executor import PythonExecutorTool
 from .shell_executor import ShellExecutorTool
-from .docker_manager import DockerListTool, DockerCreateTool, DockerRemoveTool
+from .docker_manager import DockerListTool, DockerCreateTool, DockerRemoveTool, DockerLogsTool
 from .file_manager import ReadFileTool, WriteFileTool
 from .media_processor import TranscribeMediaTool
 from .search_procedures import SearchProceduresTool
@@ -32,6 +32,7 @@ TOOLS: List[BaseTool] = [
     DockerListTool(),
     DockerCreateTool(),
     DockerRemoveTool(),
+    DockerLogsTool(),
     ReadFileTool(),
     WriteFileTool(),
     TranscribeMediaTool(),

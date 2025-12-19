@@ -244,3 +244,136 @@ ATENÇÃO: Esta ação é irreversível. Dados não persistidos serão perdidos.
         except Exception as e:
             logger.error("Erro ao remover container", error=str(e))
             return self._error(f"Erro: {str(e)}")
+
+
+class DockerLogsTool(BaseTool):
+    """Visualiza logs de um container Docker"""
+    
+    name = "docker_logs"
+    description = """Visualiza os logs de um container Docker.
+Use para: monitorar execução, verificar erros, acompanhar progresso de processos.
+IMPORTANTE: Use esta ferramenta para verificar o estado dos serviços antes de tomar decisões."""
+    
+    parameters = [
+        ToolParameter(
+            name="container",
+            type="string",
+            description="Nome ou ID do container"
+        ),
+        ToolParameter(
+            name="tail",
+            type="integer",
+            description="Número de linhas a retornar do final (padrão: 100)",
+            required=False
+        ),
+        ToolParameter(
+            name="since",
+            type="string",
+            description="Mostrar logs desde: '5m' (5 minutos), '1h' (1 hora), '2024-01-01' (data)",
+            required=False
+        ),
+        ToolParameter(
+            name="search",
+            type="string",
+            description="Filtrar logs que contenham este texto (case insensitive)",
+            required=False
+        )
+    ]
+    
+    @property
+    def docker_client(self):
+        """Obtém cliente Docker sob demanda"""
+        return get_docker_client()
+    
+    async def execute(
+        self,
+        container: str,
+        tail: int = 100,
+        since: Optional[str] = None,
+        search: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Visualiza logs de um container Docker"""
+        if not self.docker_client:
+            return self._error("Docker não disponível")
+        
+        logger.info(
+            "Obtendo logs do container",
+            container=container,
+            tail=tail,
+            since=since
+        )
+        
+        try:
+            # Obter container
+            try:
+                docker_container = self.docker_client.containers.get(container)
+            except docker.errors.NotFound:
+                return self._error(f"Container '{container}' não encontrado")
+            
+            # Configurar parâmetros de log
+            log_kwargs = {
+                "tail": tail,
+                "timestamps": True
+            }
+            
+            # Processar 'since' se fornecido
+            if since:
+                # Tentar interpretar formatos comuns
+                import re
+                from datetime import datetime, timedelta
+                
+                # Formato: 5m, 1h, 2d (minutos, horas, dias)
+                time_match = re.match(r'^(\d+)([mhd])$', since.lower())
+                if time_match:
+                    value = int(time_match.group(1))
+                    unit = time_match.group(2)
+                    
+                    if unit == 'm':
+                        delta = timedelta(minutes=value)
+                    elif unit == 'h':
+                        delta = timedelta(hours=value)
+                    elif unit == 'd':
+                        delta = timedelta(days=value)
+                    
+                    since_time = datetime.utcnow() - delta
+                    log_kwargs["since"] = since_time
+                else:
+                    # Tentar como data ISO
+                    try:
+                        log_kwargs["since"] = datetime.fromisoformat(since)
+                    except ValueError:
+                        return self._error(f"Formato de 'since' inválido: {since}. Use: 5m, 1h, 2d ou data ISO")
+            
+            # Obter logs
+            logs = docker_container.logs(**log_kwargs)
+            logs_str = logs.decode('utf-8', errors='replace')
+            
+            # Filtrar por texto se especificado
+            if search:
+                lines = logs_str.split('\n')
+                filtered = [line for line in lines if search.lower() in line.lower()]
+                logs_str = '\n'.join(filtered)
+                if not filtered:
+                    return self._success(f"Nenhum log encontrado contendo '{search}'")
+            
+            # Limitar tamanho da saída
+            max_length = 10000
+            if len(logs_str) > max_length:
+                logs_str = f"... (logs truncados, mostrando últimos {max_length} caracteres)\n" + logs_str[-max_length:]
+            
+            if not logs_str.strip():
+                return self._success(f"Container '{container}' não tem logs no período especificado.")
+            
+            logger.info("Logs obtidos", container=container, length=len(logs_str))
+            
+            return self._success(
+                f"**Logs do container '{container}'** (últimas {tail} linhas):\n\n```\n{logs_str}\n```"
+            )
+            
+        except docker.errors.APIError as e:
+            logger.error("Erro da API Docker", error=str(e))
+            return self._error(f"Erro Docker: {str(e)}")
+        except Exception as e:
+            logger.error("Erro ao obter logs", error=str(e))
+            return self._error(f"Erro: {str(e)}")
