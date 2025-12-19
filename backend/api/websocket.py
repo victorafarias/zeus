@@ -168,11 +168,16 @@ async def websocket_chat(
                 })
                 
                 try:
+                    logger.info("Iniciando processamento com agente", model=model_id)
+                    print(f"[DEBUG] Processando mensagem: {content[:50]}...")
+                    
                     # Processar com o agente
                     response = await orchestrator.process_message(
                         conversation=conversation,
                         websocket=websocket
                     )
+                    
+                    print(f"[DEBUG] Resposta recebida: {str(response)[:100]}...")
                     
                     # Adicionar resposta à conversa
                     assistant_message = Message(
