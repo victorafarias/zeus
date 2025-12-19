@@ -52,6 +52,10 @@ services:
       # Rede usada pelo Traefik
       - "traefik.docker.network=root_default"
 
+      # Middlewares para timeouts longos (1h)
+      - "traefik.http.middlewares.zeus-timeout.buffering.retryExpression=IsNetworkError() && Attempts() <= 2"
+      - "traefik.http.routers.zeus.middlewares=zeus-timeout"
+
 # =====================================================
 # REDES
 # =====================================================

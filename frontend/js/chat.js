@@ -35,8 +35,16 @@ function connectWebSocket(conversationId = null) {
 
     // Se já está conectado com a mesma conversa, não reconectar
     if (websocket && websocket.readyState === WebSocket.OPEN) {
-        console.log('[Chat] WebSocket já conectado');
-        return;
+        // Obter parameters da URL atual do socket para comparar
+        const url = new URL(websocket.url);
+        const currentConvId = url.searchParams.get('conversation_id');
+
+        // Se conversationId for null (nova conversa) e socket não tiver conversation_id, ok
+        // Se conversationId for igual ao do socket, ok
+        if (currentConvId === conversationId || (!currentConvId && !conversationId)) {
+            console.log('[Chat] WebSocket já conectado nesta conversa');
+            return;
+        }
     }
 
     // Fechar conexão existente
