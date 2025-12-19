@@ -31,3 +31,6 @@ httpx>=0.26.0
 
 # Logging estruturado
 structlog>=24.1.0
+
+# Transcrição de áudio/vídeo
+faster-whisper>=0.10.0

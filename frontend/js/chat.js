@@ -117,7 +117,7 @@ function handleWebSocketMessage(event) {
 
             case 'status':
                 if (data.status === 'processing') {
-                    showTypingIndicator();
+                    showTypingIndicator(data.content);
                 } else if (data.status === 'idle') {
                     hideTypingIndicator();
                 }
@@ -153,6 +153,15 @@ function handleWebSocketMessage(event) {
                         logsPre.textContent += output;
                         // Auto scroll
                         logsContainer.scrollTop = logsContainer.scrollHeight;
+                    }
+
+                    // Mostrar última linha no indicador de digitação para feedback imediato
+                    const lines = output.split('\n').filter(line => line.trim());
+                    if (lines.length > 0) {
+                        const lastLine = lines[lines.length - 1];
+                        // Limitar tamanho
+                        const truncated = lastLine.length > 50 ? lastLine.substring(0, 47) + '...' : lastLine;
+                        showTypingIndicator(truncated);
                     }
                 }
 
@@ -386,10 +395,28 @@ function updateConnectionStatus(status) {
 /**
  * Mostra indicador de digitação
  */
-function showTypingIndicator() {
+function showTypingIndicator(text = null) {
     if (typingIndicator) {
         typingIndicator.hidden = false;
         typingIndicator.style.display = 'flex';
+
+        // Atualizar texto se fornecido
+        if (text) {
+            const textEl = typingIndicator.querySelector('.typing-text') || typingIndicator.querySelector('span');
+            if (textEl) {
+                textEl.textContent = text;
+            } else {
+                // Se não tiver elemento de texto, criar
+                const span = document.createElement('span');
+                span.className = 'typing-text';
+                span.style.marginLeft = '10px';
+                span.style.fontSize = '0.9em';
+                span.style.color = '#888';
+                span.textContent = text;
+                typingIndicator.appendChild(span);
+            }
+        }
+
         scrollToBottom();
     }
 }

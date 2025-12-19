@@ -59,10 +59,13 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
         Args:
             code: Código Python a executar
             timeout: Timeout em segundos
+            kwargs: Argumentos extras (websocket)
             
         Returns:
             Resultado da execução
         """
+        websocket = kwargs.get('websocket')
+        
         if not self.docker_client:
             return self._error("Docker não disponível")
         
@@ -80,16 +83,9 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
             container_name = f"zeus-python-{uuid.uuid4().hex[:8]}"
             
             # Tentar usar imagem sandbox otimizada, fallback para python:3.11-slim
-            image = "zeus-sandbox-python:latest"
-            try:
-                self.docker_client.images.get(image)
-            except:
-                image = "python:3.11-slim"
-                logger.info("Usando imagem fallback", image=image)
+            image = "python:3.11-slim"
             
-            # Executar container sem montar volume, passando código via stdin
-            
-            # 1. Criar container mantendo-o rodando (tail -f /dev/null)
+            # 1. Iniciar container
             container = self.docker_client.containers.run(
                 image=image,
                 command="tail -f /dev/null", 
@@ -102,30 +98,14 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
             )
             
             try:
-                # 2. Escrever o código em um arquivo dentro do container
-                # Usamos xxd para evitar problemas de escaping de bash com aspas/quebras de linha
-                # Encode para hex no Python -> echo hex | xxd -r -p > script.py no container
+                # 2. Injetar código
                 encoded_code = code.encode('utf-8').hex()
-                
-                # Install xxd if not present (python slim might not have it, but we can try pure bash fallback if needed)
-                # Fallback simples usando printf se xxd falhar (menos robusto para binários, mas ok para texto)
                 setup_cmd = f"/bin/bash -c 'if ! command -v xxd &> /dev/null; then apt-get update && apt-get install -y xxd; fi; echo {encoded_code} | xxd -r -p > /code/script.py'"
-                
-                # Executar comando de setup (pode demorar um pouco se instalar xxd)
                 container.exec_run(setup_cmd)
                 
-                # 3. Executar o script Python
-                result = container.exec_run("python /code/script.py")
+                # REFATORANDO para rodar stream em thread para não bloquear loop e permitir websocket send
                 
-                # 4. Capturar output
-                output = result.output.decode('utf-8')
-                
-                logger.info(
-                    "Python executado com sucesso",
-                    output_length=len(output)
-                )
-                
-                return self._success(output)
+                return await self._run_with_streaming(container, websocket)
                     
             finally:
                 # Parar container (auto-remove fará a limpeza)
@@ -133,10 +113,68 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
                     container.stop()
                 except:
                     pass
-
-                
-
         
         except Exception as e:
             logger.error("Erro ao executar Python", error=str(e))
             return self._error(f"Erro interno: {str(e)}")
+
+    async def _run_with_streaming(self, container, websocket):
+        """Executa script e faz streaming do output em background"""
+        import asyncio
+        import threading
+        
+        output_buffer = []
+        
+        def stream_generator():
+            # Executa comando unbuffered
+            return container.exec_run("python -u /code/script.py", stream=True, demux=True)
+
+        # Rodar generator em thread para não bloquear o async loop
+        # Iterar sobre o generator é bloqueante IO
+        
+        q = asyncio.Queue()
+        
+        def producer():
+            try:
+                gen = stream_generator()
+                for stdout, stderr in gen:
+                    chunk = ""
+                    is_err = False
+                    if stdout: chunk = stdout.decode('utf-8', errors='replace')
+                    if stderr: 
+                        chunk = stderr.decode('utf-8', errors='replace')
+                        is_err = True
+                    if chunk:
+                        # Colocar na queue thread-safe
+                        asyncio.run_coroutine_threadsafe(q.put((chunk, is_err)), loop)
+            except Exception as e:
+                asyncio.run_coroutine_threadsafe(q.put(None), loop) # Sinal de fim
+            finally:
+                asyncio.run_coroutine_threadsafe(q.put(None), loop)
+
+        loop = asyncio.get_running_loop()
+        t = threading.Thread(target=producer, daemon=True)
+        t.start()
+        
+        # Consumir fila
+        while True:
+            item = await q.get()
+            if item is None:
+                break
+            
+            chunk, is_err = item
+            output_buffer.append(chunk)
+            
+            if websocket:
+                try:
+                    await websocket.send_json({
+                        "type": "tool_log",
+                        "tool": "execute_python",
+                        "output": chunk,
+                        "is_error": is_err
+                    })
+                except:
+                    pass
+        
+        full_output = "".join(output_buffer)
+        return self._success(full_output)
