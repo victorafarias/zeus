@@ -10,6 +10,7 @@ let websocket = null;
 let isConnected = false;
 let isProcessing = false;
 let pendingFiles = [];
+let toolModalTimeout = null;
 
 // Elementos DOM
 let messagesContainer = null;
@@ -97,6 +98,7 @@ function handleWebSocketMessage(event) {
             case 'message':
                 // Mensagem completa do assistente
                 hideTypingIndicator();
+                hideToolModal(); // Garantir que modal está fechado
                 addMessage('assistant', data.content, data.tool_calls);
                 isProcessing = false;
                 enableInput();
@@ -124,6 +126,7 @@ function handleWebSocketMessage(event) {
 
             case 'error':
                 hideTypingIndicator();
+                hideToolModal(); // Garantir que modal está fechado
                 addMessage('system', `❌ ${data.content}`);
                 isProcessing = false;
                 enableInput();
@@ -365,6 +368,14 @@ function showToolModal(toolName) {
     if (modal && toolNameEl) {
         toolNameEl.textContent = toolName;
         modal.hidden = false;
+
+        // Timeout de segurança: fechar após 60 segundos
+        if (toolModalTimeout) {
+            clearTimeout(toolModalTimeout);
+        }
+        toolModalTimeout = setTimeout(() => {
+            hideToolModal();
+        }, 60000);
     }
 }
 
@@ -376,6 +387,11 @@ function hideToolModal() {
     const modal = document.getElementById('tool-modal');
     if (modal) {
         modal.hidden = true;
+    }
+    // Limpar timeout
+    if (toolModalTimeout) {
+        clearTimeout(toolModalTimeout);
+        toolModalTimeout = null;
     }
 }
 
