@@ -90,6 +90,8 @@ Para tarefas longas (downloads, instalações), aumente o timeout."""
         Returns:
             Resultado da execução
         """
+        websocket = kwargs.get('websocket')
+
         # Verificar comandos bloqueados
         command_lower = command.lower().strip()
         
