@@ -204,7 +204,13 @@ Para tarefas longas (downloads, instalações), aumente o timeout."""
             try:
                 await asyncio.wait_for(process.wait(), timeout=timeout)
                 # Garantir leitura completa dos buffers
-                await asyncio.gather(*tasks)
+                # Adicionamos um timeout curto aqui pois processos mal comportados (background)
+                # podem manter stdout/stderr abertos mesmo após o processo principal morrer.
+                try:
+                    await asyncio.wait_for(asyncio.gather(*tasks), timeout=2.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Timeout ao ler streams finais (provável processo em background mantendo pipes)")
+                    # Não falhamos a execução, apenas paramos de ler
             except asyncio.TimeoutError:
                 process.kill()
                 # Cancelar tasks pendentes
