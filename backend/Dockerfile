@@ -9,13 +9,12 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Instalar dependências do sistema
-# - docker.io: Para comunicação com Docker socket
-# - ffmpeg: Para processamento de mídia
-# - git: Para alguns pacotes Python
 RUN apt-get update && apt-get install -y \
     docker.io \
     ffmpeg \
     git \
+    curl \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiar arquivo de dependências primeiro (para cache de camadas)
