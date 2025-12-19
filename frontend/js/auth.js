@@ -64,8 +64,8 @@ function saveUser(user) {
  * @returns {boolean}
  */
 function isLoginPage() {
-    return window.location.pathname === '/' || 
-           window.location.pathname === '/index.html';
+    return window.location.pathname === '/' ||
+        window.location.pathname === '/index.html';
 }
 
 
@@ -75,12 +75,12 @@ function isLoginPage() {
  */
 async function verifyToken() {
     const token = getToken();
-    
+
     if (!token) {
         console.log('[Auth] Nenhum token encontrado');
         return false;
     }
-    
+
     try {
         const response = await fetch(`${API_BASE}/api/auth/verify`, {
             method: 'GET',
@@ -88,7 +88,7 @@ async function verifyToken() {
                 'Authorization': `Bearer ${token}`
             }
         });
-        
+
         if (response.ok) {
             const user = await response.json();
             saveUser(user);
@@ -114,7 +114,7 @@ async function verifyToken() {
  */
 async function login(username, password) {
     console.log('[Auth] Tentando login...', username);
-    
+
     try {
         const response = await fetch(`${API_BASE}/api/auth/login`, {
             method: 'POST',
@@ -123,7 +123,7 @@ async function login(username, password) {
             },
             body: JSON.stringify({ username, password })
         });
-        
+
         if (response.ok) {
             const data = await response.json();
             saveToken(data.access_token);
@@ -133,16 +133,16 @@ async function login(username, password) {
         } else {
             const error = await response.json();
             console.log('[Auth] Login falhou:', error);
-            return { 
-                success: false, 
-                error: error.detail || 'Credenciais inválidas' 
+            return {
+                success: false,
+                error: error.detail || 'Credenciais inválidas'
             };
         }
     } catch (error) {
         console.error('[Auth] Erro no login:', error);
-        return { 
-            success: false, 
-            error: 'Erro de conexão. Tente novamente.' 
+        return {
+            success: false,
+            error: 'Erro de conexão. Tente novamente.'
         };
     }
 }
@@ -153,7 +153,7 @@ async function login(username, password) {
  */
 async function logout() {
     const token = getToken();
-    
+
     if (token) {
         try {
             // Notificar servidor (opcional, já que usamos JWT)
@@ -167,7 +167,7 @@ async function logout() {
             // Ignorar erros de logout
         }
     }
-    
+
     clearToken();
     console.log('[Auth] Logout realizado');
     window.location.href = '/';
@@ -180,7 +180,7 @@ async function logout() {
  */
 async function checkAuth() {
     const isAuthenticated = await verifyToken();
-    
+
     if (isLoginPage()) {
         if (isAuthenticated) {
             console.log('[Auth] Já autenticado, redirecionando para chat');
@@ -199,28 +199,28 @@ async function checkAuth() {
 // Event Listeners para página de login
 // =====================================================
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     console.log('[Auth] Inicializando...');
-    
+
     // Verificar autenticação
     checkAuth();
-    
+
     // Formulário de login
     const loginForm = document.getElementById('login-form');
     if (loginForm) {
         loginForm.addEventListener('submit', handleLoginSubmit);
     }
-    
+
     // Toggle de senha
     const togglePassword = document.querySelector('.toggle-password');
     if (togglePassword) {
-        togglePassword.addEventListener('click', function() {
+        togglePassword.addEventListener('click', function () {
             const input = document.getElementById('password');
             const type = input.type === 'password' ? 'text' : 'password';
             input.type = type;
         });
     }
-    
+
     // Botão de logout
     const btnLogout = document.getElementById('btn-logout');
     if (btnLogout) {
@@ -235,28 +235,29 @@ document.addEventListener('DOMContentLoaded', function() {
  */
 async function handleLoginSubmit(e) {
     e.preventDefault();
-    
+
     const form = e.target;
     const username = form.username.value.trim();
     const password = form.password.value;
     const btnLogin = document.getElementById('btn-login');
     const errorMessage = document.getElementById('error-message');
-    
+
     // Validação básica
     if (!username || !password) {
         showError('Preencha todos os campos');
         return;
     }
-    
+
     // Desabilitar botão e mostrar loader
     btnLogin.disabled = true;
     btnLogin.querySelector('.btn-text').hidden = true;
     btnLogin.querySelector('.btn-loader').hidden = false;
+    btnLogin.querySelector('.btn-loader').style.display = 'block'; // Forçar display
     errorMessage.hidden = true;
-    
+
     try {
         const result = await login(username, password);
-        
+
         if (result.success) {
             // Redirecionar para chat
             window.location.href = '/chat';
@@ -266,12 +267,14 @@ async function handleLoginSubmit(e) {
             btnLogin.disabled = false;
             btnLogin.querySelector('.btn-text').hidden = false;
             btnLogin.querySelector('.btn-loader').hidden = true;
+            btnLogin.querySelector('.btn-loader').style.display = 'none'; // Forçar esconder
         }
     } catch (error) {
         showError('Erro inesperado. Tente novamente.');
         btnLogin.disabled = false;
         btnLogin.querySelector('.btn-text').hidden = false;
         btnLogin.querySelector('.btn-loader').hidden = true;
+        btnLogin.querySelector('.btn-loader').style.display = 'none'; // Forçar esconder
     }
 }
 

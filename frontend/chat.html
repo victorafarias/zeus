@@ -166,7 +166,7 @@
     <!-- ========================================= -->
     <!-- Modal de Tool Execution -->
     <!-- ========================================= -->
-    <div class="modal-overlay" id="tool-modal" hidden>
+    <div class="modal-overlay" id="tool-modal" hidden style="display: none !important;">
         <div class="modal tool-modal">
             <div class="modal-header">
                 <h3>🔧 Executando Ferramenta</h3>
@@ -183,13 +183,22 @@
         </div>
     </div>
 
+    <!-- Script para garantir modal escondido -->
+    <script>
+        // Esconder modal imediatamente
+        document.addEventListener('DOMContentLoaded', function () {
+            var modal = document.getElementById('tool-modal');
+            if (modal) modal.style.display = 'none';
+        });
+    </script>
+
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="/js/auth.js?v=5"></script>
-    <script src="/js/models.js?v=5"></script>
-    <script src="/js/conversations.js?v=5"></script>
-    <script src="/js/chat.js?v=5"></script>
+    <script src="/js/auth.js?v=6"></script>
+    <script src="/js/models.js?v=6"></script>
+    <script src="/js/conversations.js?v=6"></script>
+    <script src="/js/chat.js?v=6"></script>
 </body>
 
 </html>
