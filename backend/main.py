@@ -106,6 +106,14 @@ if os.path.exists(frontend_path):
     app.mount("/css", StaticFiles(directory=os.path.join(frontend_path, "css")), name="css")
     app.mount("/js", StaticFiles(directory=os.path.join(frontend_path, "js")), name="js")
 
+# Montar diretórios de dados para download público
+# CUIDADO: Isso expõe os arquivos gerados publicamente se não houver autenticação extra
+if os.path.exists(settings.outputs_dir):
+    app.mount("/outputs", StaticFiles(directory=settings.outputs_dir), name="outputs")
+
+if os.path.exists(settings.uploads_dir):
+    app.mount("/uploads", StaticFiles(directory=settings.uploads_dir), name="uploads")
+
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
