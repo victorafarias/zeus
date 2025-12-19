@@ -351,9 +351,13 @@ function updateConnectionStatus(status) {
 /**
  * Mostra indicador de digitação
  */
+/**
+ * Mostra indicador de digitação
+ */
 function showTypingIndicator() {
     if (typingIndicator) {
         typingIndicator.hidden = false;
+        typingIndicator.style.display = 'flex';
         scrollToBottom();
     }
 }
@@ -365,6 +369,8 @@ function showTypingIndicator() {
 function hideTypingIndicator() {
     if (typingIndicator) {
         typingIndicator.hidden = true;
+        typingIndicator.style.display = 'none';
+        isProcessing = false; // Resetar estado caso esteja preso
     }
 }
 

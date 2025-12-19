@@ -95,9 +95,11 @@ async def websocket_chat(
             id=conversation_id or str(uuid.uuid4()),
             title="Nova Conversa"
         )
-        save_conversation(conversation)
+        # NÃO salvar imediatamente para evitar conversas vazias
+        # save_conversation(conversation)
         
-        # Notificar cliente sobre nova conversa
+        # Notificar cliente sobre nova conversa apenas se foi criada explicitamente
+        # Se veio sem ID, é uma nova sessão temporária até primeira mensagem
         await websocket.send_json({
             "type": "conversation_created",
             "conversation_id": conversation.id
