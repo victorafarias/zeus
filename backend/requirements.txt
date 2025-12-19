@@ -1,0 +1,33 @@
+# =====================================================
+# ZEUS - Dependências Python
+# =====================================================
+
+# Framework Web
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+websockets>=12.0
+python-multipart>=0.0.6
+
+# Autenticação JWT
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# OpenRouter/OpenAI SDK (compatível)
+openai>=1.12.0
+
+# RAG - Base vetorial (versões com wheels pré-compilados)
+chromadb>=0.5.0
+sentence-transformers>=2.3.1
+
+# Docker SDK
+docker>=7.0.0
+
+# Utilitários
+pydantic>=2.6.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+aiofiles>=23.2.1
+httpx>=0.26.0
+
+# Logging estruturado
+structlog>=24.1.0

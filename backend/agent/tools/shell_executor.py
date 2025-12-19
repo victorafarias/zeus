@@ -1,0 +1,172 @@
+"""
+=====================================================
+ZEUS - Shell Executor Tool
+Executa comandos shell de forma segura
+=====================================================
+"""
+
+from typing import Dict, Any, List
+import asyncio
+import shlex
+
+from .base import BaseTool, ToolParameter
+from config import get_settings, get_logger
+
+logger = get_logger(__name__)
+settings = get_settings()
+
+# Lista de comandos perigosos que não devem ser executados
+BLOCKED_COMMANDS = [
+    "rm -rf /",
+    "rm -rf /*",
+    "mkfs",
+    "dd if=/dev/zero",
+    ":(){:|:&};:",  # Fork bomb
+    "chmod -R 777 /",
+    "chown -R",
+]
+
+# Comandos que requerem confirmação (não bloqueados, mas alertados)
+DANGEROUS_PATTERNS = [
+    "rm -rf",
+    "rm -r",
+    "shutdown",
+    "reboot",
+    "halt",
+    "init 0",
+    "init 6",
+]
+
+
+class ShellExecutorTool(BaseTool):
+    """
+    Executa comandos shell no servidor.
+    
+    Implementa algumas proteções básicas contra comandos destrutivos.
+    """
+    
+    name = "execute_shell"
+    description = """Executa comandos shell/bash no servidor Linux.
+Use para: listar arquivos, verificar status do sistema, manipular arquivos,
+executar programas, verificar logs, etc.
+ATENÇÃO: Comandos destrutivos podem afetar o sistema."""
+    
+    parameters = [
+        ToolParameter(
+            name="command",
+            type="string",
+            description="Comando shell a ser executado"
+        ),
+        ToolParameter(
+            name="working_dir",
+            type="string",
+            description="Diretório de trabalho (padrão: /app/data)",
+            required=False
+        ),
+        ToolParameter(
+            name="timeout",
+            type="integer",
+            description="Tempo máximo em segundos (padrão: 30)",
+            required=False
+        )
+    ]
+    
+    async def execute(
+        self,
+        command: str,
+        working_dir: str = "/app/data",
+        timeout: int = 30,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Executa comando shell.
+        
+        Args:
+            command: Comando a executar
+            working_dir: Diretório de trabalho
+            timeout: Timeout em segundos
+            
+        Returns:
+            Resultado da execução
+        """
+        # Verificar comandos bloqueados
+        command_lower = command.lower().strip()
+        
+        for blocked in BLOCKED_COMMANDS:
+            if blocked in command_lower:
+                logger.warning(
+                    "Comando bloqueado",
+                    command=command[:100]
+                )
+                return self._error(f"Comando bloqueado por segurança: {blocked}")
+        
+        # Alertar sobre comandos perigosos
+        is_dangerous = any(
+            pattern in command_lower 
+            for pattern in DANGEROUS_PATTERNS
+        )
+        
+        if is_dangerous:
+            logger.warning("Executando comando potencialmente perigoso", command=command[:100])
+        
+        # Limitar timeout
+        timeout = min(timeout, settings.max_execution_time)
+        
+        logger.info(
+            "Executando shell",
+            command=command[:100],
+            working_dir=working_dir
+        )
+        
+        try:
+            # Criar processo
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=working_dir
+            )
+            
+            # Aguardar com timeout
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                return self._error(f"Comando excedeu timeout de {timeout}s")
+            
+            # Decodificar output
+            stdout_str = stdout.decode('utf-8', errors='replace')
+            stderr_str = stderr.decode('utf-8', errors='replace')
+            
+            # Verificar código de retorno
+            if process.returncode != 0:
+                logger.warning(
+                    "Comando retornou erro",
+                    returncode=process.returncode,
+                    stderr=stderr_str[:200]
+                )
+                output = f"Código de saída: {process.returncode}\n"
+                if stdout_str:
+                    output += f"Saída:\n{stdout_str}\n"
+                if stderr_str:
+                    output += f"Erro:\n{stderr_str}"
+                return self._error(output)
+            
+            # Sucesso
+            output = stdout_str
+            if stderr_str:
+                output += f"\nAvisos:\n{stderr_str}"
+            
+            logger.info(
+                "Shell executado com sucesso",
+                output_length=len(output)
+            )
+            
+            return self._success(output or "(sem saída)")
+            
+        except Exception as e:
+            logger.error("Erro ao executar shell", error=str(e))
+            return self._error(f"Erro: {str(e)}")

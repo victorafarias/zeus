@@ -1,0 +1,32 @@
+# Zeus - Agente de IA com Execução de Tarefas
+
+# Arquivos sensíveis
+.env
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Dados locais
+data/uploads/*
+data/outputs/*
+data/conversations/*
+data/chromadb/*
+!data/**/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+docker-compose-local.yml

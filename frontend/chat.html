@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Zeus - Chat com agente de IA">
+    <title>Zeus - Chat</title>
+
+    <!-- Fonte Google - Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+
+    <!-- Highlight.js para código -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+
+    <!-- Estilos -->
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+
+<body class="chat-page">
+    <!-- ========================================= -->
+    <!-- SIDEBAR - Lista de Conversas -->
+    <!-- ========================================= -->
+    <aside class="sidebar" id="sidebar">
+        <!-- Header da Sidebar -->
+        <div class="sidebar-header">
+            <button class="btn-new-chat" id="btn-new-chat">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+                </svg>
+                <span>Nova Conversa</span>
+            </button>
+        </div>
+
+        <!-- Busca -->
+        <div class="sidebar-search">
+            <input type="text" id="search-conversations" placeholder="Buscar conversas...">
+        </div>
+
+        <!-- Lista de Conversas -->
+        <div class="conversations-list" id="conversations-list">
+            <!-- Conversas serão inseridas aqui via JS -->
+        </div>
+
+        <!-- Footer da Sidebar -->
+        <div class="sidebar-footer">
+            <button class="btn-logout" id="btn-logout">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z" />
+                </svg>
+                <span>Sair</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- ========================================= -->
+    <!-- MAIN - Área de Chat -->
+    <!-- ========================================= -->
+    <main class="chat-main">
+        <!-- Header do Chat -->
+        <header class="chat-header">
+            <!-- Toggle Sidebar (mobile) -->
+            <button class="btn-toggle-sidebar" id="btn-toggle-sidebar">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
+                </svg>
+            </button>
+
+            <!-- Logo -->
+            <div class="header-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="logo-icon">
+                    <path d="M12 2L1 21h22L12 2zm0 4l7.53 13H4.47L12 6z" />
+                </svg>
+                <span>Zeus</span>
+            </div>
+
+            <!-- Seletor de Modelo -->
+            <div class="model-selector">
+                <select id="model-select">
+                    <option value="">Carregando modelos...</option>
+                </select>
+            </div>
+
+            <!-- Status de Conexão -->
+            <div class="connection-status" id="connection-status">
+                <span class="status-dot"></span>
+                <span class="status-text">Conectando...</span>
+            </div>
+        </header>
+
+        <!-- Área de Mensagens -->
+        <div class="messages-container" id="messages-container">
+            <!-- Tela inicial quando não há mensagens -->
+            <div class="welcome-screen" id="welcome-screen">
+                <div class="welcome-content">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                        class="welcome-icon">
+                        <path d="M12 2L1 21h22L12 2zm0 4l7.53 13H4.47L12 6z" />
+                    </svg>
+                    <h2>Olá! Eu sou o Zeus</h2>
+                    <p>Seu agente de IA com poderes de execução. Posso:</p>
+                    <ul class="capabilities-list">
+                        <li>⚡ Executar código Python</li>
+                        <li>🖥️ Rodar comandos no terminal</li>
+                        <li>🐳 Gerenciar containers Docker</li>
+                        <li>🎙️ Transcrever áudio e vídeo</li>
+                        <li>📁 Ler e criar arquivos</li>
+                    </ul>
+                    <p class="welcome-hint">Digite uma mensagem para começar...</p>
+                </div>
+            </div>
+
+            <!-- Mensagens do Chat -->
+            <div class="messages" id="messages">
+                <!-- Mensagens serão inseridas aqui via JS -->
+            </div>
+        </div>
+
+        <!-- Indicador de Digitação/Processamento -->
+        <div class="typing-indicator" id="typing-indicator" hidden>
+            <div class="typing-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+            <span class="typing-text">Zeus está pensando...</span>
+        </div>
+
+        <!-- Área de Input -->
+        <div class="input-area">
+            <form id="message-form" class="message-form">
+                <!-- Botão de Upload -->
+                <button type="button" class="btn-upload" id="btn-upload" title="Enviar arquivo">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z" />
+                    </svg>
+                </button>
+                <input type="file" id="file-input" hidden multiple>
+
+                <!-- Campo de Mensagem -->
+                <div class="input-wrapper">
+                    <textarea id="message-input" placeholder="Digite sua mensagem..." rows="1" autofocus></textarea>
+                </div>
+
+                <!-- Botão Enviar -->
+                <button type="submit" class="btn-send" id="btn-send" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                    </svg>
+                </button>
+            </form>
+
+            <!-- Preview de Arquivos -->
+            <div class="file-preview" id="file-preview" hidden>
+                <!-- Files serão listados aqui -->
+            </div>
+        </div>
+    </main>
+
+    <!-- ========================================= -->
+    <!-- Modal de Tool Execution -->
+    <!-- ========================================= -->
+    <div class="modal-overlay" id="tool-modal" hidden>
+        <div class="modal tool-modal">
+            <div class="modal-header">
+                <h3>🔧 Executando Ferramenta</h3>
+            </div>
+            <div class="modal-body">
+                <div class="tool-info">
+                    <span class="tool-name" id="tool-name"></span>
+                    <div class="tool-status">
+                        <div class="spinner"></div>
+                        <span>Processando...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/models.js"></script>
+    <script src="/js/conversations.js"></script>
+    <script src="/js/chat.js"></script>
+</body>
+
+</html>
