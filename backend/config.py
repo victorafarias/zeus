@@ -50,19 +50,17 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     
     # -------------------------------------------------
-    # Local LLM (Ollama - Orquestrador Principal)
-    # Nota: Usa hostname 'ollama' pois está na mesma rede Docker (open_webui_default)
+    # Modelos de IA (via OpenRouter)
     # -------------------------------------------------
-    local_llm_base_url: str = "http://ollama:11434/v1"
-    local_llm_api_key: str = "ollama"
     
-    # Modelo Primário: Gemma 3 4B Tools (3 minutos timeout) - Variante com suporte a tools
-    primary_llm_model: str = "orieg/gemma3-tools:4b-it-qat"
-    primary_llm_timeout: int = 180  # segundos (3 minutos)
+    # Modelo Primário: Google Gemma 3 27B (3 minutos timeout)
+    primary_model: str = "google/gemma-3-27b-it"
+    primary_model_timeout: int = 180  # segundos (3 minutos)
     
-    # Modelo Secundário: Llama3.2 (5 minutos timeout)
-    secondary_llm_model: str = "llama3.2:3b"
-    secondary_llm_timeout: int = 300  # segundos (5 minutos)
+    # Modelo Secundário: OpenAI GPT-4o-mini (5 minutos timeout)
+    # Fallback caso o primário falhe
+    secondary_model: str = "openai/gpt-oss-120b"
+    secondary_model_timeout: int = 300  # segundos (5 minutos)
     
     # -------------------------------------------------
     # Autenticação (valores devem vir do .env)

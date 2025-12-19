@@ -11,8 +11,7 @@ import json
 import asyncio
 
 from config import get_settings, get_logger
-from agent.local_llm_client import LocalLLMClient
-from agent.openrouter_client import get_openrouter_client  # Fallback
+from agent.openrouter_client import get_openrouter_client
 from agent.prompts import SYSTEM_PROMPT, RAG_CONTEXT_TEMPLATE
 from agent.tools import get_all_tools, execute_tool
 
@@ -43,35 +42,27 @@ class AgentOrchestrator:
     Orquestrador principal do agente Zeus.
     
     Gerencia:
-    - Comunicação com LLM local (Llama 3.1 via Ollama)
-    - Fallback para OpenRouter se LLM local indisponível
+    - Comunicação com OpenRouter (modelos primário e secundário)
+    - Fallback automático entre modelos
     - Execução de tools
     - Ciclo de tool calling (múltiplas iterações)
     """
     
     def __init__(self):
-        """Inicializa o orquestrador com LLM local"""
-        # Tentar usar LLM local primeiro
-        self.use_local = True
-        try:
-            self.local_client = LocalLLMClient()
-            self.client = self.local_client
-            logger.info(
-                "Usando LLM local (Ollama)",
-                primary_model=settings.primary_llm_model,
-                secondary_model=settings.secondary_llm_model
-            )
-        except Exception as e:
-            logger.warning("LLM local indisponível, usando OpenRouter", error=str(e))
-            self.local_client = None
-            self.client = get_openrouter_client()
-            self.use_local = False
-        
+        """Inicializa o orquestrador com cliente OpenRouter"""
+        self.client = get_openrouter_client()
         self.tools = get_all_tools()
+        
+        # Modelos configurados
+        self.primary_model = settings.primary_model
+        self.primary_timeout = settings.primary_model_timeout
+        self.secondary_model = settings.secondary_model
+        self.secondary_timeout = settings.secondary_model_timeout
         
         logger.info(
             "Orquestrador inicializado",
-            use_local=self.use_local,
+            primary_model=self.primary_model,
+            secondary_model=self.secondary_model,
             tools_count=len(self.tools)
         )
     
@@ -213,57 +204,89 @@ class AgentOrchestrator:
             )
             await self._send_log_feedback(websocket, f"Iteração do agente ({iteration})")
             
-            # Enviar para o modelo
-            if self.use_local:
-                await self._send_log_feedback(
-                    websocket, 
-                    f"Enviando para LLM local ({settings.primary_llm_model})"
-                )
-            else:
-                await self._send_log_feedback(websocket, "Enviando para OpenRouter")
+            # Enviar para o modelo primário primeiro, com fallback para secundário
+            await self._send_log_feedback(
+                websocket, 
+                f"Enviando para modelo primário ({self.primary_model})"
+            )
             
+            response = None
+            
+            # Tentar modelo primário
             try:
-                response = await self.client.chat_completion(
-                    messages=messages,
-                    model=conversation.model_id,
-                    tools=self.tools if self.tools else None
+                response = await asyncio.wait_for(
+                    self.client.chat_completion(
+                        messages=messages,
+                        model=self.primary_model,
+                        tools=self.tools if self.tools else None
+                    ),
+                    timeout=self.primary_timeout
                 )
+                logger.info("Resposta do modelo primário recebida", model=self.primary_model)
+                
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Timeout no modelo primário, tentando secundário",
+                    primary_model=self.primary_model,
+                    timeout=self.primary_timeout
+                )
+                await self._send_log_feedback(
+                    websocket,
+                    f"Timeout em {self.primary_model}, tentando {self.secondary_model}"
+                )
+                
             except Exception as e:
-                # Se usando LLM local e falhou (ambos Gemma e Llama), tentar fallback para OpenRouter
-                if self.use_local:
-                    logger.warning(
-                        "LLMs locais falharam (Gemma e Llama), tentando fallback para OpenRouter",
+                logger.warning(
+                    "Erro no modelo primário, tentando secundário",
+                    primary_model=self.primary_model,
+                    error=str(e)
+                )
+                await self._send_log_feedback(
+                    websocket,
+                    f"Erro em {self.primary_model}, tentando {self.secondary_model}"
+                )
+            
+            # Se primário falhou, tentar secundário
+            if response is None:
+                try:
+                    await self._send_log_feedback(
+                        websocket,
+                        f"Enviando para modelo secundário ({self.secondary_model})"
+                    )
+                    
+                    response = await asyncio.wait_for(
+                        self.client.chat_completion(
+                            messages=messages,
+                            model=self.secondary_model,
+                            tools=self.tools if self.tools else None
+                        ),
+                        timeout=self.secondary_timeout
+                    )
+                    logger.info("Resposta do modelo secundário recebida", model=self.secondary_model)
+                    
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "Timeout no modelo secundário também",
+                        secondary_model=self.secondary_model,
+                        timeout=self.secondary_timeout
+                    )
+                    await self._send_log_feedback(websocket, "Erro: Timeout em todos os modelos")
+                    return {
+                        "content": f"Erro: Ambos os modelos não responderam a tempo. "
+                                  f"{self.primary_model} ({self.primary_timeout}s) e "
+                                  f"{self.secondary_model} ({self.secondary_timeout}s)",
+                        "role": "assistant"
+                    }
+                    
+                except Exception as e:
+                    logger.error(
+                        "Erro no modelo secundário também",
+                        secondary_model=self.secondary_model,
                         error=str(e)
                     )
-                    await self._send_log_feedback(
-                        websocket, 
-                        f"LLMs locais ({settings.primary_llm_model} e {settings.secondary_llm_model}) falharam, tentando OpenRouter"
-                    )
-                    try:
-                        await self._send_log_feedback(
-                            websocket, 
-                            f"Enviando para OpenRouter ({conversation.model_id})"
-                        )
-                        fallback_client = get_openrouter_client()
-                        response = await fallback_client.chat_completion(
-                            messages=messages,
-                            model=conversation.model_id,
-                            tools=self.tools if self.tools else None
-                        )
-                    except Exception as fallback_error:
-                        logger.error("Fallback para OpenRouter também falhou", error=str(fallback_error))
-                        await self._send_log_feedback(websocket, "Erro: OpenRouter também falhou")
-                        return {
-                            "content": f"Erro: Todos os modelos falharam. "
-                                      f"{settings.primary_llm_model} e {settings.secondary_llm_model}: {str(e)}. "
-                                      f"OpenRouter: {str(fallback_error)}",
-                            "role": "assistant"
-                        }
-                else:
-                    logger.error("Erro na comunicação com modelo", error=str(e))
-                    await self._send_log_feedback(websocket, "Erro na comunicação com modelo")
+                    await self._send_log_feedback(websocket, "Erro: Falha em todos os modelos")
                     return {
-                        "content": f"Ocorreu um erro de comunicação com o modelo de IA: {str(e)}. Por favor, tente novamente.",
+                        "content": f"Erro: Ambos os modelos falharam. Erro: {str(e)}",
                         "role": "assistant"
                     }
             
