@@ -8,6 +8,7 @@ Gerencia o ciclo de vida do agente e execução de tools
 from typing import Dict, Any, List, Optional
 from fastapi import WebSocket
 import json
+import asyncio
 
 from config import get_settings, get_logger
 from agent.openrouter_client import get_openrouter_client
@@ -257,6 +258,7 @@ class AgentOrchestrator:
                     # Iniciar heartbeat
                     heartbeat_task = asyncio.create_task(heartbeat(websocket)) if websocket else None
 
+                    result = None
                     # Executar a tool
                     try:
                         result = await execute_tool(tool_name, tool_args)
