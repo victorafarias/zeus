@@ -51,9 +51,9 @@ class Settings(BaseSettings):
     
     # -------------------------------------------------
     # Local LLM (Ollama - Orquestrador Principal)
-    # Nota: Usa host.docker.internal para acessar Ollama no host a partir do container
+    # Nota: Usa hostname 'ollama' pois está na mesma rede Docker (open_webui_default)
     # -------------------------------------------------
-    local_llm_base_url: str = "http://host.docker.internal:11434/v1"
+    local_llm_base_url: str = "http://ollama:11434/v1"
     local_llm_model: str = "llama3.1:8b"
     local_llm_api_key: str = "ollama"
     local_llm_timeout: int = 60  # segundos

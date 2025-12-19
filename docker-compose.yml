@@ -42,6 +42,8 @@ services:
       - root_default
       # Rede interna para comunicação com containers sandbox
       - zeus-internal
+      # Rede do Ollama para comunicação com LLM local
+      - open_webui_default
 
     # Labels do Traefik para roteamento HTTPS
     labels:
@@ -70,3 +72,6 @@ networks:
   # Rede interna isolada para containers sandbox
   zeus-internal:
     driver: bridge
+  # Rede do Ollama (já existente)
+  open_webui_default:
+    external: true
