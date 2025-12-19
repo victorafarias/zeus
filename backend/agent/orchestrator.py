@@ -230,6 +230,8 @@ class AgentOrchestrator:
                         args=list(tool_args.keys())
                     )
                     
+                    tool_args["websocket"] = websocket
+
                     # Executar a tool
                     result = await execute_tool(tool_name, tool_args)
                     

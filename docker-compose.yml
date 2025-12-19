@@ -18,8 +18,10 @@ services:
       - AUTH_USERNAME=${AUTH_USERNAME}
       - AUTH_PASSWORD=${AUTH_PASSWORD}
       - ENVIRONMENT=production
-      - MAX_EXECUTION_TIME=${MAX_EXECUTION_TIME:-300}
+      - MAX_EXECUTION_TIME=${MAX_EXECUTION_TIME:-3600}
       - MAX_MEMORY_MB=${MAX_MEMORY_MB:-512}
+      # Evitar deadlocks com bibliotecas de ML ao fazer fork
+      - TOKENIZERS_PARALLELISM=false
 
     # Volumes montados
     volumes:

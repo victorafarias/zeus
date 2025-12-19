@@ -49,7 +49,8 @@ class ShellExecutorTool(BaseTool):
     description = """Executa comandos shell/bash no servidor Linux.
 Use para: listar arquivos, verificar status do sistema, manipular arquivos,
 executar programas, verificar logs, etc.
-ATENÇÃO: Comandos destrutivos podem afetar o sistema."""
+ATENÇÃO: Comandos destrutivos podem afetar o sistema.
+Para tarefas longas (downloads, instalações), aumente o timeout."""
     
     parameters = [
         ToolParameter(
@@ -66,7 +67,7 @@ ATENÇÃO: Comandos destrutivos podem afetar o sistema."""
         ToolParameter(
             name="timeout",
             type="integer",
-            description="Tempo máximo em segundos (padrão: 30)",
+            description="Tempo máximo em segundos (padrão: 30, máx: 3600). Defina um valor alto para tarefas demoradas.",
             required=False
         )
     ]
@@ -127,19 +128,48 @@ ATENÇÃO: Comandos destrutivos podem afetar o sistema."""
                 cwd=working_dir
             )
             
-            # Aguardar com timeout
+            stdout_buffer = []
+            stderr_buffer = []
+
+            async def read_stream(stream, buffer, is_stderr=False):
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    decoded = line.decode('utf-8', errors='replace')
+                    buffer.append(decoded)
+                    
+                    if websocket:
+                        try:
+                            await websocket.send_json({
+                                "type": "tool_log",
+                                "tool": "execute_shell",
+                                "output": decoded,
+                                "is_error": is_stderr
+                            })
+                        except Exception:
+                            pass # Ignorar erros de envio
+
+            # Tarefas de leitura
+            tasks = [
+                asyncio.create_task(read_stream(process.stdout, stdout_buffer)),
+                asyncio.create_task(read_stream(process.stderr, stderr_buffer, True))
+            ]
+            
+            # Aguardar processo com timeout
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=timeout
-                )
+                await asyncio.wait_for(process.wait(), timeout=timeout)
+                # Garantir leitura completa dos buffers
+                await asyncio.gather(*tasks)
             except asyncio.TimeoutError:
                 process.kill()
+                # Cancelar tasks pendentes
+                for t in tasks: t.cancel()
                 return self._error(f"Comando excedeu timeout de {timeout}s")
             
-            # Decodificar output
-            stdout_str = stdout.decode('utf-8', errors='replace')
-            stderr_str = stderr.decode('utf-8', errors='replace')
+            # Reconstruir output completo
+            stdout_str = "".join(stdout_buffer)
+            stderr_str = "".join(stderr_buffer)
             
             # Verificar código de retorno
             if process.returncode != 0:

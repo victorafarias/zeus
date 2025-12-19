@@ -119,11 +119,35 @@ function handleWebSocketMessage(event) {
                 showToolModal(data.tool);
                 break;
 
+            case 'tool_log':
+                updateToolLog(data.output);
+                break;
+
             case 'tool_result':
                 hideToolModal();
                 break;
 
             case 'error':
+                // ... (resto do código)
+
+                // ...
+
+                /**
+                 * Atualiza logs da tool em execução
+                 * @param {string} output - Texto do log
+                 */
+                function updateToolLog(output) {
+                    const logsContainer = document.querySelector('.tool-logs-container');
+                    const logsPre = document.getElementById('tool-logs');
+
+                    if (logsContainer && logsPre) {
+                        logsContainer.style.display = 'block';
+                        logsPre.textContent += output;
+                        // Auto scroll
+                        logsContainer.scrollTop = logsContainer.scrollHeight;
+                    }
+                }
+
                 hideTypingIndicator();
                 hideToolModal(); // Garantir que modal está fechado
                 addMessage('system', `❌ ${data.content}`);
@@ -382,10 +406,16 @@ function hideTypingIndicator() {
 function showToolModal(toolName) {
     const modal = document.getElementById('tool-modal');
     const toolNameEl = document.getElementById('tool-name');
+    const logsContainer = document.querySelector('.tool-logs-container');
+    const logsPre = document.getElementById('tool-logs');
 
     if (modal && toolNameEl) {
         toolNameEl.textContent = toolName;
         modal.hidden = false;
+
+        // Limpar logs anteriores
+        if (logsContainer) logsContainer.style.display = 'none';
+        if (logsPre) logsPre.textContent = '';
 
         // Timeout de segurança: fechar após 60 segundos
         if (toolModalTimeout) {
