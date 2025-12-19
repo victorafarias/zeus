@@ -4,12 +4,13 @@ services:
   # =====================================================
   # ZEUS BACKEND - Servidor Principal
   # Container que roda a API FastAPI com o agente de IA
+  # Também serve o frontend como arquivos estáticos
   # =====================================================
   zeus-backend:
     build: ./backend
     container_name: zeus-backend
     restart: unless-stopped
-    
+
     # Variáveis de ambiente carregadas do arquivo .env
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
@@ -19,21 +20,23 @@ services:
       - ENVIRONMENT=production
       - MAX_EXECUTION_TIME=${MAX_EXECUTION_TIME:-300}
       - MAX_MEMORY_MB=${MAX_MEMORY_MB:-512}
-    
+
     # Volumes montados
     volumes:
       # Dados persistentes (conversas, uploads, ChromaDB)
       - ./data:/app/data
+      # Frontend - arquivos estáticos servidos pelo FastAPI
+      - ./frontend:/app/frontend:ro
       # Socket Docker para gerenciar containers (somente leitura)
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    
+
     # Redes
     networks:
       # Rede do Traefik para receber tráfego externo
       - root_default
       # Rede interna para comunicação com containers sandbox
       - zeus-internal
-    
+
     # Labels do Traefik para roteamento HTTPS
     labels:
       - "traefik.enable=true"

@@ -24,14 +24,18 @@ COPY requirements.txt .
 # Instalar dependências Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar código fonte
+# Copiar código fonte do backend
 COPY . .
+
+# Copiar frontend (será montado ou copiado pelo docker-compose)
+# O frontend fica em /app/frontend
 
 # Criar diretórios necessários
 RUN mkdir -p /app/data/uploads \
     /app/data/outputs \
     /app/data/conversations \
-    /app/data/chromadb
+    /app/data/chromadb \
+    /app/frontend
 
 # Expor porta da API
 EXPOSE 8000
