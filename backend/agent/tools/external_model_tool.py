@@ -7,7 +7,7 @@ Permite ao orquestrador local delegar tarefas complexas
 """
 
 from typing import Dict, Any, Optional
-from agent.tools.base import BaseTool
+from agent.tools.base import BaseTool, ToolParameter
 from agent.openrouter_client import get_openrouter_client
 from config import get_logger
 
@@ -37,26 +37,27 @@ NÃO use para:
 - Execução de comandos ou operações com arquivos
 - Busca em RAG ou operações locais"""
 
-    parameters = {
-        "type": "object",
-        "properties": {
-            "task_description": {
-                "type": "string",
-                "description": "Descrição clara e detalhada da tarefa para o modelo externo"
-            },
-            "context": {
-                "type": "string",
-                "description": "Contexto adicional relevante (código, dados, histórico)"
-            },
-            "model_preference": {
-                "type": "string",
-                "description": "Preferência de modelo: 'gpt4' para lógica/código, 'claude' para escrita/análise",
-                "enum": ["gpt4", "claude", "auto"],
-                "default": "auto"
-            }
-        },
-        "required": ["task_description"]
-    }
+    parameters = [
+        ToolParameter(
+            name="task_description",
+            type="string",
+            description="Descrição clara e detalhada da tarefa para o modelo externo",
+            required=True
+        ),
+        ToolParameter(
+            name="context",
+            type="string",
+            description="Contexto adicional relevante (código, dados, histórico)",
+            required=False
+        ),
+        ToolParameter(
+            name="model_preference",
+            type="string",
+            description="Preferência de modelo: 'gpt4' para lógica/código, 'claude' para escrita/análise, 'auto' para automático",
+            required=False,
+            enum=["gpt4", "claude", "auto"]
+        )
+    ]
     
     # Mapeamento de preferências para modelos
     MODEL_MAP = {
