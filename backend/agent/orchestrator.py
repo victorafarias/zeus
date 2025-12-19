@@ -191,7 +191,7 @@ class AgentOrchestrator:
         executed_procedures = []
         
         # Limitar número de iterações para evitar loops infinitos
-        max_iterations = 10
+        max_iterations = 50
         iteration = 0
         
         while iteration < max_iterations:

@@ -123,11 +123,10 @@ Para tarefas longas (downloads, instalações), aumente o timeout."""
         
         try:
             # Detectar se é um comando em background
-            is_background = (
-                command.strip().endswith('&') or
-                'nohup' in command.lower() or
-                command.strip().endswith('&>')
-            )
+            # IMPORTANTE: Apenas consideramos background se o usuário colocar & no final.
+            # Se usar 'nohup' mas sem '&', assumimos que o usuário quer rodar síncrono 
+            # (ou é um wrapper que vai devolver PID, tipo: bash -c "nohup ... & echo $!")
+            is_background = command.strip().endswith('&')
             
             if is_background:
                 # Para comandos em background, garantir que tenha & no final
