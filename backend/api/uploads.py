@@ -27,8 +27,13 @@ settings = get_settings()
 ALLOWED_EXTENSIONS = {
     # Documentos
     '.txt', '.md', '.json', '.csv', '.xml', '.yaml', '.yml',
+    '.pdf', '.doc', '.docx', '.rtf',  # PDFs e Word
     # Código
     '.py', '.js', '.ts', '.html', '.css', '.sql', '.sh',
+    '.java', '.c', '.cpp', '.h', '.cs', '.go', '.rs', '.rb',  # Linguagens compiladas
+    '.php', '.swift', '.kt', '.scala', '.r', '.m', '.lua',     # Outras linguagens
+    '.pl', '.ex', '.exs', '.vue', '.jsx', '.tsx',              # Web/Elixir
+    '.bat', '.ps1', '.dockerfile', '.makefile',                # Scripts/Config
     # Áudio
     '.mp3', '.wav', '.m4a', '.ogg', '.flac', '.aac',
     # Vídeo
@@ -191,3 +196,166 @@ async def delete_file(
                 raise HTTPException(status_code=500, detail=f"Erro ao remover: {str(e)}")
     
     raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+
+# -------------------------------------------------
+# Funções Helper para Carregar Arquivos
+# -------------------------------------------------
+
+def find_file_by_id(file_id: str) -> Optional[dict]:
+    """
+    Busca um arquivo pelo seu ID no diretório de uploads.
+    
+    Args:
+        file_id: ID do arquivo (8 caracteres hexadecimais)
+        
+    Returns:
+        Dicionário com info do arquivo ou None se não encontrado
+    """
+    if not os.path.exists(settings.uploads_dir):
+        return None
+    
+    for filename in os.listdir(settings.uploads_dir):
+        if filename.startswith(file_id + "_"):
+            filepath = os.path.join(settings.uploads_dir, filename)
+            if os.path.isfile(filepath):
+                ext = os.path.splitext(filename)[1].lower()
+                original_name = filename.split('_', 1)[1] if '_' in filename else filename
+                return {
+                    "id": file_id,
+                    "filename": filename,
+                    "original_name": original_name,
+                    "extension": ext,
+                    "path": filepath,
+                    "size": os.path.getsize(filepath)
+                }
+    return None
+
+
+async def load_file_content(file_id: str) -> Optional[dict]:
+    """
+    Carrega o conteúdo de um arquivo baseado no seu ID.
+    
+    Para arquivos de texto/código: retorna o texto completo.
+    Para imagens: retorna base64 do conteúdo.
+    Para PDFs: retorna indicação de que é PDF (precisa de biblioteca adicional).
+    
+    Args:
+        file_id: ID do arquivo
+        
+    Returns:
+        Dicionário com conteúdo ou None se não encontrado
+        {
+            "file_id": str,
+            "name": str,
+            "type": "text" | "image" | "binary",
+            "content": str (texto ou base64)
+        }
+    """
+    import base64
+    
+    file_info = find_file_by_id(file_id)
+    if not file_info:
+        logger.warning("Arquivo não encontrado", file_id=file_id)
+        return None
+    
+    ext = file_info["extension"]
+    filepath = file_info["path"]
+    
+    # Extensões de texto/código
+    text_extensions = {
+        '.txt', '.md', '.json', '.csv', '.xml', '.yaml', '.yml',
+        '.py', '.js', '.ts', '.html', '.css', '.sql', '.sh',
+        '.java', '.c', '.cpp', '.h', '.cs', '.go', '.rs', '.rb',
+        '.php', '.swift', '.kt', '.scala', '.r', '.m', '.lua',
+        '.pl', '.ex', '.exs', '.vue', '.jsx', '.tsx',
+        '.bat', '.ps1', '.dockerfile', '.makefile', '.rtf'
+    }
+    
+    # Extensões de imagem
+    image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+    
+    try:
+        if ext in text_extensions:
+            # Arquivo de texto - ler como string
+            async with aiofiles.open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                content = await f.read()
+            
+            # Limitar tamanho para evitar contexto muito grande
+            max_chars = 50000  # ~50KB de texto
+            if len(content) > max_chars:
+                content = content[:max_chars] + "\n\n[... conteúdo truncado, arquivo muito grande ...]"
+            
+            logger.info("Arquivo de texto carregado", file_id=file_id, chars=len(content))
+            return {
+                "file_id": file_id,
+                "name": file_info["original_name"],
+                "type": "text",
+                "content": content
+            }
+            
+        elif ext in image_extensions:
+            # Imagem - ler como base64
+            async with aiofiles.open(filepath, 'rb') as f:
+                binary_content = await f.read()
+            
+            base64_content = base64.b64encode(binary_content).decode('utf-8')
+            mime_type = {
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.png': 'image/png',
+                '.gif': 'image/gif',
+                '.webp': 'image/webp'
+            }.get(ext, 'image/jpeg')
+            
+            logger.info("Imagem carregada como base64", file_id=file_id, size=len(binary_content))
+            return {
+                "file_id": file_id,
+                "name": file_info["original_name"],
+                "type": "image",
+                "mime_type": mime_type,
+                "content": f"data:{mime_type};base64,{base64_content}"
+            }
+            
+        elif ext == '.pdf':
+            # PDF - marcar como binário (necessita biblioteca específica para extração)
+            logger.info("Arquivo PDF detectado", file_id=file_id)
+            return {
+                "file_id": file_id,
+                "name": file_info["original_name"],
+                "type": "pdf",
+                "content": f"[Arquivo PDF: {file_info['original_name']}. O conteúdo do PDF foi anexado ao chat mas requer processamento adicional para extração de texto.]",
+                "path": filepath
+            }
+            
+        elif ext in {'.doc', '.docx'}:
+            # Word - marcar como binário
+            logger.info("Arquivo Word detectado", file_id=file_id)
+            return {
+                "file_id": file_id,
+                "name": file_info["original_name"],
+                "type": "word",
+                "content": f"[Arquivo Word: {file_info['original_name']}. O arquivo foi anexado ao chat.]",
+                "path": filepath
+            }
+            
+        else:
+            # Outros formatos binários
+            logger.info("Arquivo binário detectado", file_id=file_id, ext=ext)
+            return {
+                "file_id": file_id,
+                "name": file_info["original_name"],
+                "type": "binary",
+                "content": f"[Arquivo binário: {file_info['original_name']} ({ext})]",
+                "path": filepath
+            }
+            
+    except Exception as e:
+        logger.error("Erro ao carregar arquivo", file_id=file_id, error=str(e))
+        return {
+            "file_id": file_id,
+            "name": file_info["original_name"],
+            "type": "error",
+            "content": f"[Erro ao carregar arquivo: {str(e)}]"
+        }
+

@@ -37,6 +37,9 @@ class Message(BaseModel):
     # Campos opcionais para tool calls
     tool_calls: Optional[List[dict]] = None
     tool_call_id: Optional[str] = None
+    
+    # Arquivos anexados à mensagem (lista de IDs de arquivos)
+    attached_files: Optional[List[str]] = None
 
 
 class Conversation(BaseModel):

@@ -244,7 +244,13 @@ function sendMessage(content) {
     }
 
     // Adicionar mensagem do usuário à interface
-    addMessage('user', content);
+    // Se houver arquivos anexados, mostrar indicação
+    let displayContent = content;
+    if (pendingFiles.length > 0) {
+        const fileNames = pendingFiles.map(f => f.original_name).join(', ');
+        displayContent = content + `\n\n📎 Arquivos anexados: ${fileNames}`;
+    }
+    addMessage('user', displayContent);
 
     // Esconder tela de boas-vindas
     hideWelcomeScreen();
@@ -257,6 +263,9 @@ function sendMessage(content) {
     showTypingIndicator();
     showCancelButton();
 
+    // Preparar lista de IDs dos arquivos anexados
+    const attachedFileIds = pendingFiles.map(f => f.id);
+
     // Enviar via WebSocket
     // Incluir os três modelos selecionados para o sistema de fallback
     const selectedModels = Models.getSelectedModels();
@@ -267,12 +276,18 @@ function sendMessage(content) {
             primary: selectedModels.primary,
             secondary: selectedModels.secondary,
             tertiary: selectedModels.tertiary
-        }
+        },
+        attached_files: attachedFileIds  // IDs dos arquivos anexados
     };
 
     console.log('[Chat] Enviando mensagem com modelos:', selectedModels);
+    console.log('[Chat] Arquivos anexados:', attachedFileIds);
     websocket.send(JSON.stringify(message));
     console.log('[Chat] Mensagem enviada');
+
+    // Limpar arquivos pendentes e esconder preview
+    pendingFiles = [];
+    renderFilePreview();
 }
 
 
@@ -678,6 +693,39 @@ function initChat() {
         fileInput.addEventListener('change', handleFileSelect);
     }
 
+    // -------------------------------------------------
+    // Drag and Drop de arquivos na área de input
+    // -------------------------------------------------
+    const inputArea = document.querySelector('.input-area');
+
+    if (inputArea) {
+        // Prevenir comportamento padrão do navegador
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            inputArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        // Highlight visual ao arrastar sobre a área
+        ['dragenter', 'dragover'].forEach(eventName => {
+            inputArea.addEventListener(eventName, () => {
+                inputArea.classList.add('drag-over');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            inputArea.addEventListener(eventName, () => {
+                inputArea.classList.remove('drag-over');
+            }, false);
+        });
+
+        // Handler do drop
+        inputArea.addEventListener('drop', handleDrop, false);
+    }
+
     // Toggle sidebar (mobile)
     const btnToggle = document.getElementById('btn-toggle-sidebar');
     const sidebar = document.getElementById('sidebar');
@@ -701,20 +749,221 @@ function initChat() {
 
 
 /**
- * Handler para seleção de arquivos
- * @param {Event} e - Evento de change
+ * Handler para drag and drop de arquivos
+ * @param {DragEvent} e - Evento de drop
  */
-function handleFileSelect(e) {
+async function handleDrop(e) {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+
+    if (!files.length) return;
+
+    console.log('[Chat] Arquivos arrastados:', files.length);
+
+    // Mostrar preview container
+    const filePreview = document.getElementById('file-preview');
+    if (filePreview) {
+        filePreview.hidden = false;
+        filePreview.style.display = 'flex';
+    }
+
+    // Fazer upload de cada arquivo
+    for (const file of files) {
+        await uploadFile(file);
+    }
+}
+
+
+/**
+ * Handler para seleção de arquivos
+ * Faz upload via API e exibe preview
+ * @param {Event} e - Evento de change do input file
+ */
+async function handleFileSelect(e) {
     const files = e.target.files;
     if (!files.length) return;
 
-    // TODO: Implementar upload de arquivos
     console.log('[Chat] Arquivos selecionados:', files.length);
 
-    // Por enquanto, apenas notificar que ainda não está implementado
-    alert('Upload de arquivos será implementado em uma próxima versão.');
+    // Mostrar preview container
+    const filePreview = document.getElementById('file-preview');
+    if (filePreview) {
+        filePreview.hidden = false;
+        filePreview.style.display = 'flex';
+    }
 
+    // Fazer upload de cada arquivo
+    for (const file of files) {
+        await uploadFile(file);
+    }
+
+    // Limpar input para permitir re-selecionar mesmo arquivo
     e.target.value = '';
+}
+
+
+/**
+ * Faz upload de um arquivo via API
+ * @param {File} file - Arquivo a enviar
+ */
+async function uploadFile(file) {
+    const token = Auth.getToken();
+    if (!token) {
+        console.error('[Chat] Sem token para upload');
+        return;
+    }
+
+    // Criar FormData
+    const formData = new FormData();
+    formData.append('files', file);
+
+    try {
+        console.log('[Chat] Enviando arquivo:', file.name);
+
+        const response = await fetch('/api/uploads/', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`Erro HTTP: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.success && data.files.length > 0) {
+            // Arquivo enviado com sucesso
+            const uploadedFile = data.files[0];
+            console.log('[Chat] Arquivo enviado:', uploadedFile.id, uploadedFile.original_name);
+
+            // Adicionar ao array de arquivos pendentes
+            pendingFiles.push(uploadedFile);
+
+            // Atualizar preview
+            renderFilePreview();
+        } else if (data.errors && data.errors.length > 0) {
+            // Erros no upload
+            console.error('[Chat] Erros no upload:', data.errors);
+            alert(`Erro ao enviar arquivo: ${data.errors.join(', ')}`);
+        }
+
+    } catch (error) {
+        console.error('[Chat] Erro ao fazer upload:', error);
+        alert(`Erro ao enviar arquivo: ${error.message}`);
+    }
+}
+
+
+/**
+ * Renderiza preview dos arquivos pendentes
+ */
+function renderFilePreview() {
+    const filePreview = document.getElementById('file-preview');
+    if (!filePreview) return;
+
+    // Limpar preview anterior
+    filePreview.innerHTML = '';
+
+    if (pendingFiles.length === 0) {
+        filePreview.hidden = true;
+        filePreview.style.display = 'none';
+        return;
+    }
+
+    // Mostrar preview
+    filePreview.hidden = false;
+    filePreview.style.display = 'flex';
+
+    // Adicionar cada arquivo
+    pendingFiles.forEach((file, index) => {
+        const fileItem = document.createElement('div');
+        fileItem.className = 'file-item';
+
+        // Ícone baseado na extensão
+        const icon = getFileIcon(file.extension);
+
+        fileItem.innerHTML = `
+            <span class="file-icon">${icon}</span>
+            <span class="file-name" title="${file.original_name}">${file.original_name}</span>
+            <button type="button" class="remove-file" data-index="${index}" title="Remover arquivo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                </svg>
+            </button>
+        `;
+
+        // Event listener para remover
+        const removeBtn = fileItem.querySelector('.remove-file');
+        removeBtn.addEventListener('click', () => removeFile(index));
+
+        filePreview.appendChild(fileItem);
+    });
+}
+
+
+/**
+ * Remove um arquivo da lista de pendentes
+ * @param {number} index - Índice do arquivo a remover
+ */
+function removeFile(index) {
+    console.log('[Chat] Removendo arquivo no índice:', index);
+
+    // Remover do array
+    pendingFiles.splice(index, 1);
+
+    // Re-renderizar preview
+    renderFilePreview();
+}
+
+
+/**
+ * Retorna ícone apropriado para o tipo de arquivo
+ * @param {string} extension - Extensão do arquivo
+ * @returns {string} Emoji/ícone do arquivo
+ */
+function getFileIcon(extension) {
+    const ext = extension.toLowerCase();
+
+    // Imagens
+    if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
+        return '🖼️';
+    }
+
+    // PDFs
+    if (ext === '.pdf') {
+        return '📄';
+    }
+
+    // Word
+    if (['.doc', '.docx'].includes(ext)) {
+        return '📝';
+    }
+
+    // Código
+    if (['.py', '.js', '.ts', '.html', '.css', '.java', '.c', '.cpp', '.go', '.rs'].includes(ext)) {
+        return '💻';
+    }
+
+    // Texto
+    if (['.txt', '.md', '.json', '.xml', '.yaml', '.yml', '.csv'].includes(ext)) {
+        return '📃';
+    }
+
+    // Áudio
+    if (['.mp3', '.wav', '.m4a', '.ogg', '.flac'].includes(ext)) {
+        return '🎵';
+    }
+
+    // Vídeo
+    if (['.mp4', '.webm', '.avi', '.mov'].includes(ext)) {
+        return '🎬';
+    }
+
+    // Padrão
+    return '📎';
 }
 
 

@@ -8,6 +8,7 @@ Você vai ajudar um iniciante a programação a criar sistemas inteligentes e mo
 Você vai gerar códigos completos e bem comentados; e vai dar orientações bem detalhadas para o usuário quando necessário, partindo do princípio de que ele é iniciante em programação.
 Você vai implementar logs estruturados em pontos estratégicos do código, front e backend, para que o usuário possa te ajudar a debugar erros pelos console do navegador e do terminal.
 Sempre estruture os códigos fornecidos garantindo uma indentação padrão e legível (4 espaços por nível) e separando as operações complexas em linhas distintas. Nunca combine múltiplas operações com ponto e vírgula na mesma linha.
+Não execute comandos de deploy ou commit. Peça ao usuário para fazer isso.
 
 Dados da VPS: 31.97.163.164 - com o traefik no root gerenciando todos os apontamentos. A rede do traefik é 'root_default'. E os labels são:
 '''

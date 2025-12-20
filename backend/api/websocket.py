@@ -17,6 +17,7 @@ from api.conversations import (
     Message,
     Conversation
 )
+from api.uploads import load_file_content
 from agent.orchestrator import AgentOrchestrator
 from services.rate_limiter import get_rate_limiter
 
@@ -166,6 +167,9 @@ async def websocket_chat(
             if msg_type == "message":
                 content = message_data.get("content", "").strip()
                 
+                # Extrair arquivos anexados
+                attached_files = message_data.get("attached_files", [])
+                
                 # Extrair modelos customizados do frontend (1ª, 2ª e 3ª Instância)
                 # Se não fornecidos, usa os valores padrão do config
                 models_data = message_data.get("models", {})
@@ -175,8 +179,52 @@ async def websocket_chat(
                     "tertiary": models_data.get("tertiary", settings.secondary_model)
                 }
                 
-                if not content:
+                if not content and not attached_files:
                     continue
+                
+                # -------------------------------------------------
+                # Processar arquivos anexados
+                # -------------------------------------------------
+                file_context = ""
+                image_attachments = []  # Para imagens, enviaremos separadamente
+                
+                if attached_files:
+                    logger.info(
+                        "Processando arquivos anexados",
+                        count=len(attached_files)
+                    )
+                    
+                    for file_id in attached_files:
+                        file_data = await load_file_content(file_id)
+                        
+                        if file_data:
+                            if file_data["type"] == "text":
+                                # Arquivo de texto/código: incluir no contexto
+                                file_context += f"\n\n--- Arquivo: {file_data['name']} ---\n"
+                                file_context += file_data["content"]
+                                file_context += "\n--- Fim do arquivo ---\n"
+                                
+                            elif file_data["type"] == "image":
+                                # Imagem: adicionar referência (modelos podem não suportar)
+                                image_attachments.append(file_data)
+                                file_context += f"\n[Imagem anexada: {file_data['name']}]\n"
+                                
+                            else:
+                                # PDFs, Word, binários: incluir indicação
+                                file_context += f"\n{file_data['content']}\n"
+                        else:
+                            file_context += f"\n[Erro: arquivo {file_id} não encontrado]\n"
+                    
+                    logger.info(
+                        "Contexto de arquivos construído",
+                        context_length=len(file_context),
+                        images_count=len(image_attachments)
+                    )
+                
+                # Combinar conteúdo da mensagem com contexto dos arquivos
+                full_content = content
+                if file_context:
+                    full_content = content + file_context
                 
                 # Reset do estado de cancelamento para nova mensagem
                 cancel_state["cancelled"] = False
@@ -201,10 +249,16 @@ async def websocket_chat(
                     continue
                 
                 # Adicionar mensagem do usuário à conversa
+                # Nota: Usamos 'content' (sem arquivos) para salvar, mas 'full_content' é usado internamente
+                # Isso evita salvar contexto de arquivos gigantes na conversa persistida
                 user_message = Message(
                     role="user",
-                    content=content
+                    content=content  # Salva apenas o texto original
                 )
+                # Guardar referência aos arquivos anexados (se houver)
+                if attached_files:
+                    user_message.attached_files = attached_files
+                    
                 conversation.messages.append(user_message)
                 conversation.model_id = custom_models["primary"]  # Guardar modelo primário
                 

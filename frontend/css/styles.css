@@ -998,6 +998,8 @@ ol {
 .input-area {
     padding: 1rem 1.5rem 1.5rem;
     background: var(--color-bg-primary);
+    position: relative;
+    transition: all var(--transition-fast);
 }
 
 .message-form {
@@ -1054,6 +1056,26 @@ ol {
 
 .input-area textarea::placeholder {
     color: var(--color-text-muted);
+}
+
+/* Estado de drag-over para upload de arquivos */
+.input-area.drag-over {
+    border-color: var(--color-accent-primary);
+    background: rgba(99, 102, 241, 0.1);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.input-area.drag-over::after {
+    content: '📎 Solte os arquivos aqui';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--color-accent-primary);
+    pointer-events: none;
+    z-index: 10;
 }
 
 .btn-send {
@@ -1154,14 +1176,24 @@ ol {
     text-overflow: ellipsis;
 }
 
+.file-item .file-icon {
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+
 .file-item .remove-file {
     padding: 0.125rem;
     color: var(--color-text-muted);
     border-radius: 4px;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .file-item .remove-file:hover {
     color: var(--color-error);
+    background: rgba(239, 68, 68, 0.1);
 }
 
 
