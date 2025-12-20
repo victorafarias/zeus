@@ -20,6 +20,7 @@ from .rag_manager import RAGManagerTool
 from .ssh_tunnel_publisher import SSHTunnelPublisherTool
 from .yt_downloader import YouTubeDownloaderTool
 from .yt_transcriber import YouTubeTranscriberTool
+from .web_search_tool import WebSearchTool
 
 from config import get_logger
 
@@ -48,6 +49,7 @@ TOOLS: List[BaseTool] = [
     SSHTunnelPublisherTool(),
     YouTubeDownloaderTool(),
     YouTubeTranscriberTool(),
+    WebSearchTool(),
 ]
 
 # Dicionário para acesso rápido por nome
