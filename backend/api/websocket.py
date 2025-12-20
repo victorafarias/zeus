@@ -6,6 +6,7 @@ Gerencia conexões WebSocket para chat em tempo real
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from starlette.websockets import WebSocketState
 from typing import Optional
 import json
 
@@ -27,6 +28,40 @@ from services.rate_limiter import get_rate_limiter
 router = APIRouter()
 logger = get_logger(__name__)
 settings = get_settings()
+
+
+# -------------------------------------------------
+# Função auxiliar para envio seguro via WebSocket
+# -------------------------------------------------
+async def safe_send_json(websocket: WebSocket, data: dict) -> bool:
+    """
+    Envia JSON via WebSocket apenas se a conexão ainda estiver aberta.
+    
+    Args:
+        websocket: Conexão WebSocket
+        data: Dicionário a ser enviado como JSON
+        
+    Returns:
+        True se enviou com sucesso, False se a conexão estava fechada
+    """
+    try:
+        # Verifica se o WebSocket ainda está conectado
+        if websocket.client_state == WebSocketState.CONNECTED:
+            await websocket.send_json(data)
+            return True
+        else:
+            logger.warning(
+                "Tentativa de envio para WebSocket fechado ignorada",
+                data_type=data.get("type", "unknown")
+            )
+            return False
+    except Exception as e:
+        logger.warning(
+            "Erro ao enviar via WebSocket (conexão possivelmente fechada)",
+            error=str(e),
+            data_type=data.get("type", "unknown")
+        )
+        return False
 
 
 # -------------------------------------------------
@@ -328,14 +363,15 @@ async def websocket_chat(
                         "Erro ao processar mensagem",
                         error=str(e)
                     )
-                    await websocket.send_json({
+                    # Usar envio seguro - conexão pode ter sido fechada
+                    await safe_send_json(websocket, {
                         "type": "error",
                         "content": f"Erro ao processar: {str(e)}"
                     })
                 
                 finally:
-                    # Notificar que terminou
-                    await websocket.send_json({
+                    # Notificar que terminou (usando envio seguro)
+                    await safe_send_json(websocket, {
                         "type": "status",
                         "status": "idle"
                     })
@@ -352,10 +388,8 @@ async def websocket_chat(
     
     except Exception as e:
         logger.error("Erro no WebSocket", error=str(e))
-        try:
-            await websocket.send_json({
-                "type": "error",
-                "content": f"Erro interno: {str(e)}"
-            })
-        except:
-            pass
+        # Envio seguro - não precisa de try/except adicional
+        await safe_send_json(websocket, {
+            "type": "error",
+            "content": f"Erro interno: {str(e)}"
+        })
