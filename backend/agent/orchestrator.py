@@ -165,10 +165,13 @@ class AgentOrchestrator:
                 content = response.get("content", "")
                 tool_calls = response.get("tool_calls")
                 
-                # Erro específico retornado pelo client quando modelo openrouter falha silenciosamente
+                # Erros específicos retornados pelo client que devem acionar fallback
                 is_empty_error = isinstance(content, str) and "Erro: O modelo retornou uma resposta vazia" in content
+                is_malformed_tool_error = isinstance(content, str) and "Erro: O modelo gerou tool calls malformados" in content
                 
-                if (content or tool_calls) and not is_empty_error:
+                has_error = is_empty_error or is_malformed_tool_error
+                
+                if (content or tool_calls) and not has_error:
                     # Sucesso! Resposta válida
                     return response
                 
