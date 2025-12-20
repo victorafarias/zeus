@@ -19,8 +19,10 @@ from api.conversations import (
     Conversation
 )
 from api.uploads import load_file_content
+from api.ws_manager import get_ws_manager
 from agent.orchestrator import AgentOrchestrator
 from services.rate_limiter import get_rate_limiter
+from services.task_queue import get_task_queue, TaskStatus
 
 # -------------------------------------------------
 # Configuração
@@ -144,12 +146,33 @@ async def websocket_chat(
     # Criar orquestrador do agente
     orchestrator = AgentOrchestrator()
     
+    # Obter gerenciadores
+    ws_manager = get_ws_manager()
+    task_queue = get_task_queue()
+    
+    # Registrar conexão no gerenciador (para receber broadcasts)
+    await ws_manager.connect(websocket, conversation.id)
+    
     # Estado de cancelamento compartilhado entre WebSocket e orquestrador
     # Usado para sinalizar ao processamento que deve ser cancelado
     cancel_state = {
         "cancelled": False,
         "active_process": None  # Armazena processo shell ativo (se houver)
     }
+    
+    # Enviar tarefas ativas da conversa ao conectar
+    try:
+        active_tasks = await task_queue.list_tasks_by_conversation(conversation.id, limit=10)
+        for task in active_tasks:
+            if task.status in [TaskStatus.PENDING, TaskStatus.PROCESSING]:
+                await websocket.send_json({
+                    "type": "task_status",
+                    "task_id": task.id,
+                    "status": task.status.value,
+                    "user_message": task.user_message[:100]
+                })
+    except Exception as e:
+        logger.warning("Erro ao enviar tarefas ativas", error=str(e))
     
     try:
         while True:
@@ -305,81 +328,128 @@ async def websocket_chat(
                     if len(content.split()) > 6:
                         conversation.title += "..."
                 
-                # Notificar que está processando
-                await websocket.send_json({
-                    "type": "status",
-                    "status": "processing"
-                })
+                # Verificar se deve usar processamento em background
+                # O cliente pode solicitar explicitamente, ou pode ser automatic se detectado
+                use_background = message_data.get("background", False)
                 
-                try:
-                    logger.info(
-                        "Iniciando processamento com agente",
-                        primary=custom_models["primary"],
-                        secondary=custom_models["secondary"],
-                        tertiary=custom_models["tertiary"]
-                    )
-                    print(f"[DEBUG] Processando mensagem: {content[:50]}...")
-                    
-                    # Processar com o agente, passando modelos customizados e cancel_state
-                    response = await orchestrator.process_message(
-                        conversation=conversation,
-                        websocket=websocket,
-                        custom_models=custom_models,
-                        cancel_state=cancel_state
-                    )
-                    
-                    print(f"[DEBUG] Resposta recebida: {str(response)[:100]}...")
-                    
-                    # Adicionar resposta à conversa
-                    assistant_message = Message(
-                        role="assistant",
-                        content=response.get("content", ""),
-                        tool_calls=response.get("tool_calls")
-                    )
-                    conversation.messages.append(assistant_message)
-                    
-                    # Atualizar timestamp
-                    from datetime import datetime
-                    conversation.updated_at = datetime.utcnow()
-                    
-                    # Restaurar conteúdo original (sem arquivos) antes de salvar
-                    # Isso evita persistir o contexto grande dos arquivos
-                    user_message.content = content  # Volta para o texto original
-                    
-                    # Salvar conversa
-                    save_conversation(conversation)
-                    
-                    # Enviar resposta final
+                if use_background:
+                    # -------------------------------------------------
+                    # MODO BACKGROUND: Criar tarefa na fila
+                    # -------------------------------------------------
+                    try:
+                        # Salvar conversa primeiro (para o worker encontrar)
+                        user_message.content = content  # Restaurar conteúdo original
+                        save_conversation(conversation)
+                        
+                        # Criar tarefa na fila
+                        task = await task_queue.create_task(
+                            conversation_id=conversation.id,
+                            user_message=full_content,  # Inclui contexto de arquivos
+                            models=custom_models,
+                            attached_files=attached_files
+                        )
+                        
+                        logger.info(
+                            "Tarefa criada para processamento em background",
+                            task_id=task.id,
+                            conversation_id=conversation.id
+                        )
+                        
+                        # Notificar cliente sobre a tarefa criada
+                        await websocket.send_json({
+                            "type": "task_created",
+                            "task_id": task.id,
+                            "status": "pending",
+                            "message": "Sua mensagem foi enfileirada para processamento. Você pode fechar esta janela e a resposta será processada em background."
+                        })
+                        
+                    except Exception as e:
+                        logger.error("Erro ao criar tarefa", error=str(e))
+                        await websocket.send_json({
+                            "type": "error",
+                            "content": f"Erro ao criar tarefa: {str(e)}"
+                        })
+                else:
+                    # -------------------------------------------------
+                    # MODO SÍNCRONO: Processar diretamente via WebSocket
+                    # -------------------------------------------------
+                    # Notificar que está processando
                     await websocket.send_json({
-                        "type": "message",
-                        "role": "assistant",
-                        "content": response.get("content", ""),
-                        "message_id": assistant_message.id,
-                        "tool_calls": response.get("tool_calls")
+                        "type": "status",
+                        "status": "processing"
                     })
                     
-                except Exception as e:
-                    logger.error(
-                        "Erro ao processar mensagem",
-                        error=str(e)
-                    )
-                    # Usar envio seguro - conexão pode ter sido fechada
-                    await safe_send_json(websocket, {
-                        "type": "error",
-                        "content": f"Erro ao processar: {str(e)}"
-                    })
-                
-                finally:
-                    # Notificar que terminou (usando envio seguro)
-                    await safe_send_json(websocket, {
-                        "type": "status",
-                        "status": "idle"
-                    })
+                    try:
+                        logger.info(
+                            "Iniciando processamento com agente",
+                            primary=custom_models["primary"],
+                            secondary=custom_models["secondary"],
+                            tertiary=custom_models["tertiary"]
+                        )
+                        print(f"[DEBUG] Processando mensagem: {content[:50]}...")
+                        
+                        # Processar com o agente, passando modelos customizados e cancel_state
+                        response = await orchestrator.process_message(
+                            conversation=conversation,
+                            websocket=websocket,
+                            custom_models=custom_models,
+                            cancel_state=cancel_state
+                        )
+                        
+                        print(f"[DEBUG] Resposta recebida: {str(response)[:100]}...")
+                        
+                        # Adicionar resposta à conversa
+                        assistant_message = Message(
+                            role="assistant",
+                            content=response.get("content", ""),
+                            tool_calls=response.get("tool_calls")
+                        )
+                        conversation.messages.append(assistant_message)
+                        
+                        # Atualizar timestamp
+                        from datetime import datetime
+                        conversation.updated_at = datetime.utcnow()
+                        
+                        # Restaurar conteúdo original (sem arquivos) antes de salvar
+                        # Isso evita persistir o contexto grande dos arquivos
+                        user_message.content = content  # Volta para o texto original
+                        
+                        # Salvar conversa
+                        save_conversation(conversation)
+                        
+                        # Enviar resposta final
+                        await websocket.send_json({
+                            "type": "message",
+                            "role": "assistant",
+                            "content": response.get("content", ""),
+                            "message_id": assistant_message.id,
+                            "tool_calls": response.get("tool_calls")
+                        })
+                        
+                    except Exception as e:
+                        logger.error(
+                            "Erro ao processar mensagem",
+                            error=str(e)
+                        )
+                        # Usar envio seguro - conexão pode ter sido fechada
+                        await safe_send_json(websocket, {
+                            "type": "error",
+                            "content": f"Erro ao processar: {str(e)}"
+                        })
+                    
+                    finally:
+                        # Notificar que terminou (usando envio seguro)
+                        await safe_send_json(websocket, {
+                            "type": "status",
+                            "status": "idle"
+                        })
             
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
     
     except WebSocketDisconnect:
+        # Desregistrar do gerenciador
+        await ws_manager.disconnect(websocket)
         logger.info(
             "WebSocket desconectado",
             username=username,
@@ -387,6 +457,8 @@ async def websocket_chat(
         )
     
     except Exception as e:
+        # Desregistrar do gerenciador
+        await ws_manager.disconnect(websocket)
         logger.error("Erro no WebSocket", error=str(e))
         # Envio seguro - não precisa de try/except adicional
         await safe_send_json(websocket, {

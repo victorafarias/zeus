@@ -188,6 +188,46 @@ function handleWebSocketMessage(event) {
                 enableInput();
                 break;
 
+            case 'task_created':
+                // Tarefa foi criada para processamento em background
+                console.log('[Chat] Tarefa criada:', data.task_id);
+                showTypingIndicator('Processamento em background iniciado...');
+                addMessage('system', `📋 ${data.message || 'Sua mensagem foi enfileirada para processamento em background.'}`);
+                // Não esconder botão de cancelar - tarefa ainda está processando
+                break;
+
+            case 'task_status':
+                // Atualização de status de tarefa
+                console.log('[Chat] Status da tarefa:', data.task_id, data.status);
+                if (data.status === 'completed') {
+                    hideTypingIndicator();
+                    hideCancelButton();
+                    if (data.result) {
+                        addMessage('assistant', data.result, data.tool_calls);
+                    }
+                    isProcessing = false;
+                    enableInput();
+                    // Recarregar conversa para pegar mensagens salvas
+                    Conversations.loadConversations();
+                } else if (data.status === 'failed') {
+                    hideTypingIndicator();
+                    hideCancelButton();
+                    addMessage('system', `❌ Erro no processamento: ${data.error || 'Erro desconhecido'}`);
+                    isProcessing = false;
+                    enableInput();
+                } else if (data.status === 'processing') {
+                    showTypingIndicator(`Processando tarefa...`);
+                } else if (data.status === 'pending') {
+                    showTypingIndicator(`Tarefa na fila de processamento...`);
+                }
+                break;
+
+            case 'task_progress':
+                // Progresso de uma tarefa em execução
+                console.log('[Chat] Progresso da tarefa:', data.message);
+                showTypingIndicator(data.message);
+                break;
+
             case 'pong':
                 // Keep-alive response
                 break;

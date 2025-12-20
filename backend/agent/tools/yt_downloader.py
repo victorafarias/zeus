@@ -10,6 +10,7 @@ import os
 import uuid
 import asyncio
 import re
+import tempfile
 
 from .base import BaseTool, ToolParameter
 from config import get_settings, get_logger
@@ -29,7 +30,9 @@ class YouTubeDownloaderTool(BaseTool):
 Use format='video' (padrão) para baixar vídeo MP4 ou format='audio' para extrair apenas o áudio em MP3.
 Parâmetro quality permite escolher qualidade do vídeo: 'best', '720p', '480p', '360p'.
 O arquivo será salvo na pasta /outputs.
-Requer FFmpeg instalado no sistema."""
+Requer FFmpeg instalado no sistema.
+
+Para vídeos com restrição de idade ou que exigem login, use o parâmetro cookies_text com o conteúdo do arquivo cookies.txt exportado do navegador (formato Netscape)."""
     
     parameters = [
         ToolParameter(
@@ -54,6 +57,18 @@ Requer FFmpeg instalado no sistema."""
             type="string",
             description="Nome do arquivo de saída (opcional, sem extensão). Se não fornecido, usa o título do vídeo.",
             required=False
+        ),
+        ToolParameter(
+            name="cookies_text",
+            type="string",
+            description="Conteúdo do arquivo cookies.txt no formato Netscape. Necessário para vídeos com restrição de idade ou que exigem login. O usuário deve exportar os cookies do navegador usando extensão como 'Get cookies.txt LOCALLY'.",
+            required=False
+        ),
+        ToolParameter(
+            name="cookies_file",
+            type="string",
+            description="Caminho para arquivo cookies.txt existente (alternativa ao cookies_text). Útil quando o arquivo já foi enviado via upload.",
+            required=False
         )
     ]
     
@@ -63,6 +78,8 @@ Requer FFmpeg instalado no sistema."""
         format: str = "video",
         quality: str = "best",
         output_filename: str = None,
+        cookies_text: str = None,
+        cookies_file: str = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -73,6 +90,8 @@ Requer FFmpeg instalado no sistema."""
             format: 'video' para MP4 ou 'audio' para MP3
             quality: Qualidade do vídeo (best, 720p, 480p, 360p)
             output_filename: Nome do arquivo de saída (sem extensão)
+            cookies_text: Conteúdo do arquivo cookies.txt (formato Netscape)
+            cookies_file: Caminho para arquivo cookies.txt existente
         """
         websocket = kwargs.get('websocket')
         loop = asyncio.get_running_loop()
@@ -124,16 +143,35 @@ Requer FFmpeg instalado no sistema."""
         output_dir = settings.outputs_dir
         os.makedirs(output_dir, exist_ok=True)
         
+        # 5. Processar cookies (texto ou arquivo)
+        temp_cookies_file = None
+        effective_cookies_file = None
+        
+        if cookies_text:
+            # Criar arquivo temporário com o conteúdo dos cookies
+            temp_cookies_file = self._create_temp_cookies_file(cookies_text, output_dir)
+            if temp_cookies_file:
+                effective_cookies_file = temp_cookies_file
+                logger.info("Arquivo de cookies temporário criado", path=temp_cookies_file)
+        elif cookies_file:
+            # Usar arquivo de cookies fornecido
+            if os.path.exists(cookies_file):
+                effective_cookies_file = cookies_file
+                logger.info("Usando arquivo de cookies existente", path=cookies_file)
+            else:
+                logger.warning("Arquivo de cookies não encontrado", path=cookies_file)
+        
         logger.info(
             "Iniciando download YouTube",
             url=url,
             format=format,
-            quality=quality
+            quality=quality,
+            using_cookies=bool(effective_cookies_file)
         )
         
         report_progress(f"Iniciando download do YouTube ({format})...")
         
-        # 5. Executar download em thread separada
+        # 6. Executar download em thread separada
         try:
             result = await asyncio.to_thread(
                 self._download_synchronously,
@@ -142,6 +180,7 @@ Requer FFmpeg instalado no sistema."""
                 quality,
                 output_filename,
                 output_dir,
+                effective_cookies_file,
                 report_progress
             )
             return self._success(result)
@@ -149,7 +188,37 @@ Requer FFmpeg instalado no sistema."""
         except Exception as e:
             error_str = str(e)
             logger.error("Erro no download YouTube", error=error_str)
+            
+            # Detectar erro de restrição de idade e dar orientação
+            age_restricted_keywords = [
+                "age", "restricted", "Sign in", "confirm your age",
+                "login", "verificar", "idade"
+            ]
+            is_age_restricted = any(kw.lower() in error_str.lower() for kw in age_restricted_keywords)
+            
+            if is_age_restricted and not effective_cookies_file:
+                return self._error(
+                    f"Falha no download: {error_str}\n\n"
+                    "🔒 **Este vídeo requer autenticação (restrição de idade/login).**\n\n"
+                    "Para resolver, o usuário deve:\n"
+                    "1. Instalar a extensão 'Get cookies.txt LOCALLY' no Chrome/Edge\n"
+                    "2. Fazer login no YouTube\n"
+                    "3. Acessar o vídeo desejado\n"
+                    "4. Clicar na extensão e exportar os cookies\n"
+                    "5. Colar o conteúdo do arquivo no parâmetro 'cookies_text'\n\n"
+                    "Comando para extrair cookies via terminal (alternativo):\n"
+                    "`yt-dlp --cookies-from-browser chrome --cookies cookies.txt 'URL'`"
+                )
+            
             return self._error(f"Falha no download: {error_str}")
+        finally:
+            # Limpar arquivo temporário de cookies após o download
+            if temp_cookies_file and os.path.exists(temp_cookies_file):
+                try:
+                    os.remove(temp_cookies_file)
+                    logger.debug("Arquivo de cookies temporário removido", path=temp_cookies_file)
+                except Exception as e:
+                    logger.warning("Erro ao remover cookies temporário", error=str(e))
     
     
     def _is_youtube_url(self, url: str) -> bool:
@@ -176,6 +245,46 @@ Requer FFmpeg instalado no sistema."""
         return False
     
     
+    def _create_temp_cookies_file(self, cookies_text: str, output_dir: str) -> str:
+        """
+        Cria um arquivo temporário com o conteúdo dos cookies.
+        
+        Args:
+            cookies_text: Conteúdo do arquivo cookies.txt
+            output_dir: Diretório onde criar o arquivo
+            
+        Returns:
+            Caminho para o arquivo temporário criado, ou None se falhar
+        """
+        try:
+            # Validar se o texto parece ser cookies no formato Netscape
+            if not cookies_text or len(cookies_text.strip()) < 10:
+                logger.warning("Texto de cookies muito curto ou vazio")
+                return None
+            
+            # Verificar se tem o header Netscape (opcional, mas recomendado)
+            lines = cookies_text.strip().split('\n')
+            has_netscape_header = any('Netscape' in line for line in lines[:3])
+            
+            if not has_netscape_header:
+                logger.info("Cookies sem header Netscape, adicionando...")
+                cookies_text = "# Netscape HTTP Cookie File\n" + cookies_text
+            
+            # Criar arquivo temporário no diretório de saída
+            temp_filename = f"yt_cookies_{uuid.uuid4().hex[:8]}.txt"
+            temp_path = os.path.join(output_dir, temp_filename)
+            
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                f.write(cookies_text)
+            
+            logger.info("Arquivo de cookies temporário criado", path=temp_path, lines=len(lines))
+            return temp_path
+            
+        except Exception as e:
+            logger.error("Erro ao criar arquivo de cookies temporário", error=str(e))
+            return None
+    
+    
     def _download_synchronously(
         self,
         url: str,
@@ -183,6 +292,7 @@ Requer FFmpeg instalado no sistema."""
         quality: str,
         output_filename: str,
         output_dir: str,
+        cookies_file: str = None,
         progress_callback=None
     ) -> str:
         """
@@ -194,6 +304,7 @@ Requer FFmpeg instalado no sistema."""
             quality: Qualidade desejada
             output_filename: Nome do arquivo (opcional)
             output_dir: Diretório de saída
+            cookies_file: Caminho para arquivo de cookies (opcional)
             progress_callback: Função para reportar progresso
             
         Returns:
@@ -218,6 +329,13 @@ Requer FFmpeg instalado no sistema."""
             'noprogress': False,
             'nocheckcertificate': True,
         }
+        
+        # Adicionar arquivo de cookies se fornecido (para vídeos restritos)
+        if cookies_file and os.path.exists(cookies_file):
+            ydl_opts['cookiefile'] = cookies_file
+            logger.info("Usando cookies para bypass de restrições", cookies_file=cookies_file)
+            if progress_callback:
+                progress_callback("🍪 Usando cookies para autenticação...")
         
         # Configurar formato baseado no tipo de download
         if format == "audio":

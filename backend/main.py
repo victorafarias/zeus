@@ -19,6 +19,10 @@ from api.models import router as models_router
 from api.conversations import router as conversations_router
 from api.websocket import router as websocket_router
 from api.uploads import router as uploads_router
+from api.tasks import router as tasks_router
+
+# Importar background worker
+from services.background_worker import start_background_worker, stop_background_worker
 
 # -------------------------------------------------
 # Inicialização
@@ -71,6 +75,10 @@ async def startup_event():
         os.makedirs(dir_path, exist_ok=True)
     
     logger.info("Diretórios de dados verificados")
+    
+    # Iniciar background worker para processamento de tarefas
+    await start_background_worker()
+    logger.info("Background worker iniciado")
 
 
 @app.on_event("shutdown")
@@ -79,6 +87,10 @@ async def shutdown_event():
     Executado quando a aplicação encerra.
     Limpa recursos e conexões.
     """
+    # Parar background worker
+    await stop_background_worker()
+    logger.info("Background worker parado")
+    
     logger.info("Zeus encerrando")
 
 
@@ -89,6 +101,7 @@ app.include_router(auth_router, prefix="/api/auth", tags=["Autenticação"])
 app.include_router(models_router, prefix="/api/models", tags=["Modelos"])
 app.include_router(conversations_router, prefix="/api/conversations", tags=["Conversas"])
 app.include_router(uploads_router, prefix="/api/uploads", tags=["Uploads"])
+app.include_router(tasks_router, prefix="/api/tasks", tags=["Tarefas"])
 app.include_router(websocket_router, tags=["WebSocket"])
 
 

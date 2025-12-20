@@ -5,7 +5,7 @@ Gerencia o ciclo de vida do agente e execução de tools
 =====================================================
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable
 from fastapi import WebSocket
 import json
 import asyncio
@@ -122,15 +122,31 @@ class AgentOrchestrator:
         
         return messages
     
-    async def _send_log_feedback(self, websocket: Optional[WebSocket], message: str):
+    async def _send_log_feedback(
+        self, 
+        websocket: Optional[WebSocket], 
+        message: str,
+        progress_callback: Optional[Callable] = None,
+        step_type: str = "info"
+    ):
         """
-        Envia feedback de log para o frontend via WebSocket.
+        Envia feedback de log para o frontend via WebSocket ou callback.
         Exibe a descrição do log no indicador de digitação.
         
         Args:
             websocket: Conexão WebSocket (pode ser None)
             message: Mensagem de log a exibir
+            progress_callback: Callback alternativo para envio de progresso
+            step_type: Tipo do passo (info, tool_start, tool_end, error)
         """
+        # Primeiro, tentar callback (para background worker)
+        if progress_callback:
+            try:
+                await progress_callback(message, step_type)
+            except Exception:
+                pass
+        
+        # Depois, tentar WebSocket direto
         if websocket:
             try:
                 await websocket.send_json({
@@ -204,7 +220,8 @@ class AgentOrchestrator:
         conversation,
         websocket: Optional[WebSocket] = None,
         custom_models: Optional[Dict[str, str]] = None,
-        cancel_state: Optional[Dict[str, Any]] = None
+        cancel_state: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[Callable[[str, str], Any]] = None
     ) -> Dict[str, Any]:
         """
         Processa uma mensagem do usuário e retorna resposta.
@@ -221,6 +238,8 @@ class AgentOrchestrator:
             websocket: WebSocket para enviar atualizações em tempo real
             custom_models: Modelos customizados {primary, secondary, tertiary}
             cancel_state: Estado de cancelamento compartilhado {cancelled: bool, active_process: processo}
+            progress_callback: Callback para enviar progresso (para background worker)
+                               Assinatura: async def callback(message: str, step_type: str)
             
         Returns:
             Dicionário com resposta final
@@ -294,12 +313,12 @@ class AgentOrchestrator:
                 iteration=iteration,
                 messages_count=len(messages)
             )
-            await self._send_log_feedback(websocket, f"Iteração do agente ({iteration})")
+            await self._send_log_feedback(websocket, f"Iteração do agente ({iteration})", progress_callback)
             
-            # Fallback: 1ª Instância → 2ª Instância → 3ª Instância
             await self._send_log_feedback(
                 websocket, 
-                f"Enviando para 1ª Instância ({primary_model})"
+                f"Enviando para 1ª Instância ({primary_model})",
+                progress_callback
             )
             
             # Tentar 1ª Instância (modelo primário)
@@ -321,7 +340,8 @@ class AgentOrchestrator:
                 )
                 await self._send_log_feedback(
                     websocket,
-                    f"Erro em {primary_model}, tentando 2ª Instância ({secondary_model})"
+                    f"Erro em {primary_model}, tentando 2ª Instância ({secondary_model})",
+                    progress_callback
                 )
                 
                 response = await self._call_model_with_retry(
@@ -342,7 +362,8 @@ class AgentOrchestrator:
                     )
                     await self._send_log_feedback(
                         websocket,
-                        f"Erro em {secondary_model}, tentando 3ª Instância ({tertiary_model})"
+                        f"Erro em {secondary_model}, tentando 3ª Instância ({tertiary_model})",
+                        progress_callback
                     )
                     
                     response = await self._call_model_with_retry(
@@ -358,14 +379,14 @@ class AgentOrchestrator:
                         # Falha total em todas as instâncias
                         error_msg = f"Erro: Todos os modelos falharam (1ª: {primary_model}, 2ª: {secondary_model}, 3ª: {tertiary_model})"
                         logger.error("Falha em todas as instâncias")
-                        await self._send_log_feedback(websocket, "Erro: Falha em todas as instâncias")
+                        await self._send_log_feedback(websocket, "Erro: Falha em todas as instâncias", progress_callback, "error")
                         return {
                             "content": error_msg,
                             "role": "assistant"
                         }
             
             # Resposta recebida
-            await self._send_log_feedback(websocket, "Resposta recebida")
+            await self._send_log_feedback(websocket, "Resposta recebida", progress_callback)
             
             # Verificar se há tool calls
             tool_calls = response.get("tool_calls", [])
@@ -376,7 +397,7 @@ class AgentOrchestrator:
                     "Resposta final",
                     content_length=len(response.get("content", ""))
                 )
-                await self._send_log_feedback(websocket, "Resposta final gerada")
+                await self._send_log_feedback(websocket, "Resposta final gerada", progress_callback)
                 return response
             
             # Executar cada tool call
@@ -384,7 +405,7 @@ class AgentOrchestrator:
                 "Executando tools",
                 count=len(tool_calls)
             )
-            await self._send_log_feedback(websocket, f"Executando {len(tool_calls)} ferramenta(s)")
+            await self._send_log_feedback(websocket, f"Executando {len(tool_calls)} ferramenta(s)", progress_callback)
             
             # Adicionar resposta do assistente com tool_calls às mensagens
             messages.append({
@@ -415,7 +436,7 @@ class AgentOrchestrator:
                         name=tool_name,
                         args=list(tool_args.keys())
                     )
-                    await self._send_log_feedback(websocket, f"Executando: {tool_name}")
+                    await self._send_log_feedback(websocket, f"Executando: {tool_name}", progress_callback, "tool_start")
                     
                     tool_args["websocket"] = websocket
                     
@@ -469,10 +490,10 @@ class AgentOrchestrator:
                     # Formatar resultado
                     if result.get("success"):
                         tool_result = result.get("output", "Executado com sucesso")
-                        await self._send_log_feedback(websocket, f"Tool {tool_name} executada com sucesso")
+                        await self._send_log_feedback(websocket, f"Tool {tool_name} executada com sucesso", progress_callback, "tool_end")
                     else:
                         tool_result = f"Erro: {result.get('error', 'Erro desconhecido')}"
-                        await self._send_log_feedback(websocket, f"Erro na tool {tool_name}")
+                        await self._send_log_feedback(websocket, f"Erro na tool {tool_name}", progress_callback, "error")
                     
                 except json.JSONDecodeError as e:
                     tool_result = f"Erro ao parsear argumentos: {str(e)}"

@@ -422,8 +422,12 @@ ol {
    ============================================ */
 .chat-page {
     display: flex;
+    /* Usa svh (small viewport height) para mobile + fallback */
     height: 100vh;
+    height: 100svh;
     overflow: hidden;
+    /* Garante que o conteúdo não fique atrás da barra de status/notch */
+    padding-top: env(safe-area-inset-top, 0px);
 }
 
 /* ============================================
@@ -432,6 +436,7 @@ ol {
 .sidebar {
     width: var(--sidebar-width);
     height: 100vh;
+    height: 100svh;
     background: var(--color-bg-secondary);
     border-right: 1px solid var(--glass-border);
     display: flex;
