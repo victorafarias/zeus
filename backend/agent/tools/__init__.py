@@ -16,6 +16,8 @@ from .search_procedures import SearchProceduresTool
 from .tts_tool import TextToSpeechTool
 from .hotmart_downloader import HotmartDownloaderTool
 from .external_model_tool import ExternalModelTool
+from .rag_manager import RAGManagerTool
+from .ssh_tunnel_publisher import SSHTunnelPublisherTool
 
 from config import get_logger
 
@@ -40,6 +42,8 @@ TOOLS: List[BaseTool] = [
     TextToSpeechTool(),
     HotmartDownloaderTool(),
     ExternalModelTool(),
+    RAGManagerTool(),
+    SSHTunnelPublisherTool(),
 ]
 
 # Dicionário para acesso rápido por nome

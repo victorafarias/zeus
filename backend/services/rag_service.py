@@ -317,6 +317,121 @@ class RAGService:
         
         return "\n".join(context_parts)
     
+    async def list_procedures(
+        self,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Lista todos os procedimentos armazenados.
+        
+        Args:
+            limit: Número máximo de resultados
+            
+        Returns:
+            Lista de todos os procedimentos
+        """
+        try:
+            # ChromaDB get() retorna todos os documentos da coleção
+            results = self.procedures.get(
+                limit=limit,
+                include=["documents", "metadatas"]
+            )
+            
+            procedures = []
+            if results and results['ids']:
+                for i, doc_id in enumerate(results['ids']):
+                    doc = results['documents'][i] if results['documents'] else ""
+                    meta = results['metadatas'][i] if results['metadatas'] else {}
+                    
+                    procedures.append({
+                        "id": doc_id,
+                        "content": doc[:300] + "..." if len(doc) > 300 else doc,
+                        "tool_used": meta.get("tool_used"),
+                        "tags": json.loads(meta.get("tags", "[]"))
+                    })
+            
+            logger.debug("Listagem de procedimentos", count=len(procedures))
+            return procedures
+            
+        except Exception as e:
+            logger.error("Erro ao listar procedimentos", error=str(e))
+            return []
+    
+    async def delete_procedure(self, doc_id: str) -> bool:
+        """
+        Remove um procedimento pelo ID.
+        
+        Args:
+            doc_id: ID do procedimento a remover
+            
+        Returns:
+            True se removido com sucesso
+        """
+        try:
+            self.procedures.delete(ids=[doc_id])
+            logger.info("Procedimento removido", id=doc_id)
+            return True
+        except Exception as e:
+            logger.error("Erro ao remover procedimento", id=doc_id, error=str(e))
+            return False
+    
+    async def list_conversations(
+        self,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Lista todas as conversas armazenadas.
+        
+        Args:
+            limit: Número máximo de resultados
+            
+        Returns:
+            Lista de todas as conversas
+        """
+        try:
+            results = self.conversations.get(
+                limit=limit,
+                include=["documents", "metadatas"]
+            )
+            
+            conversations = []
+            if results and results['ids']:
+                for i, doc_id in enumerate(results['ids']):
+                    doc = results['documents'][i] if results['documents'] else ""
+                    meta = results['metadatas'][i] if results['metadatas'] else {}
+                    
+                    conversations.append({
+                        "id": doc_id,
+                        "summary": doc[:300] + "..." if len(doc) > 300 else doc,
+                        "conversation_id": meta.get("conversation_id"),
+                        "topics": json.loads(meta.get("topics", "[]"))
+                    })
+            
+            logger.debug("Listagem de conversas", count=len(conversations))
+            return conversations
+            
+        except Exception as e:
+            logger.error("Erro ao listar conversas", error=str(e))
+            return []
+    
+    async def delete_conversation(self, conversation_id: str) -> bool:
+        """
+        Remove uma conversa pelo ID.
+        
+        Args:
+            conversation_id: ID da conversa a remover
+            
+        Returns:
+            True se removido com sucesso
+        """
+        try:
+            self.conversations.delete(ids=[conversation_id])
+            logger.info("Conversa removida", id=conversation_id)
+            return True
+        except Exception as e:
+            logger.error("Erro ao remover conversa", id=conversation_id, error=str(e))
+            return False
+    
     def get_stats(self) -> Dict[str, int]:
         """Retorna estatísticas do RAG"""
         return {
