@@ -408,6 +408,8 @@ function initConversations() {
             if (conv) {
                 selectConversation(conv.id);
             }
+            // Fechar sidebar no mobile após criar nova conversa
+            closeSidebarMobile();
         });
     }
 

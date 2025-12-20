@@ -329,6 +329,16 @@ function addMessage(role, content, toolCalls = null) {
         renderedContent = marked.parse(content);
     }
 
+    // Ícone de copiar (clipboard)
+    const copyIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+    </svg>`;
+
+    // Ícone de check (copiado)
+    const checkIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+    </svg>`;
+
     message.innerHTML = `
         <div class="message-avatar">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
@@ -342,7 +352,21 @@ function addMessage(role, content, toolCalls = null) {
             </div>
             <div class="message-body">${renderedContent}</div>
         </div>
+        <button class="btn-copy-message" title="Copiar texto">
+            ${copyIcon}
+        </button>
     `;
+
+    // Armazenar o texto original para copiar (sem formatação HTML)
+    message.dataset.originalText = content;
+
+    // Event listener para o botão de copiar
+    const btnCopy = message.querySelector('.btn-copy-message');
+    if (btnCopy) {
+        btnCopy.addEventListener('click', () => {
+            copyMessageText(content, btnCopy, copyIcon, checkIcon);
+        });
+    }
 
     messagesDiv.appendChild(message);
 
@@ -355,6 +379,61 @@ function addMessage(role, content, toolCalls = null) {
 
     // Scroll para o final
     scrollToBottom();
+}
+
+
+/**
+ * Copia o texto de uma mensagem para a área de transferência
+ * @param {string} text - Texto a copiar
+ * @param {HTMLElement} button - Botão que foi clicado
+ * @param {string} copyIcon - HTML do ícone de copiar
+ * @param {string} checkIcon - HTML do ícone de check
+ */
+async function copyMessageText(text, button, copyIcon, checkIcon) {
+    try {
+        await navigator.clipboard.writeText(text);
+        console.log('[Chat] Texto copiado para área de transferência');
+
+        // Feedback visual: mudar ícone para check
+        button.innerHTML = checkIcon;
+        button.classList.add('copied');
+        button.title = 'Copiado!';
+
+        // Restaurar ícone original após 2 segundos
+        setTimeout(() => {
+            button.innerHTML = copyIcon;
+            button.classList.remove('copied');
+            button.title = 'Copiar texto';
+        }, 2000);
+
+    } catch (error) {
+        console.error('[Chat] Erro ao copiar texto:', error);
+        // Fallback para navegadores antigos
+        try {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-9999px';
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+
+            // Feedback visual
+            button.innerHTML = checkIcon;
+            button.classList.add('copied');
+            button.title = 'Copiado!';
+
+            setTimeout(() => {
+                button.innerHTML = copyIcon;
+                button.classList.remove('copied');
+                button.title = 'Copiar texto';
+            }, 2000);
+        } catch (fallbackError) {
+            console.error('[Chat] Fallback de cópia também falhou:', fallbackError);
+            alert('Não foi possível copiar o texto. Por favor, selecione e copie manualmente.');
+        }
+    }
 }
 
 
@@ -382,6 +461,9 @@ function loadConversation(conversation) {
     } else {
         showWelcomeScreen();
     }
+
+    // Fechar sidebar no mobile após selecionar conversa
+    closeSidebarMobile();
 }
 
 
@@ -726,13 +808,21 @@ function initChat() {
         inputArea.addEventListener('drop', handleDrop, false);
     }
 
-    // Toggle sidebar (mobile)
+    // Toggle sidebar (mobile) com overlay
     const btnToggle = document.getElementById('btn-toggle-sidebar');
     const sidebar = document.getElementById('sidebar');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
 
     if (btnToggle && sidebar) {
         btnToggle.addEventListener('click', () => {
-            sidebar.classList.toggle('open');
+            toggleSidebar();
+        });
+    }
+
+    // Fechar sidebar ao clicar no overlay
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', () => {
+            closeSidebarMobile();
         });
     }
 
@@ -745,6 +835,40 @@ function initChat() {
             websocket.send(JSON.stringify({ type: 'ping' }));
         }
     }, 30000);
+}
+
+
+/**
+ * Abre/fecha a sidebar no mobile
+ */
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+
+    if (sidebar && overlay) {
+        const isOpen = sidebar.classList.toggle('open');
+        if (isOpen) {
+            overlay.classList.add('active');
+        } else {
+            overlay.classList.remove('active');
+        }
+        console.log('[Chat] Sidebar toggled:', isOpen ? 'aberta' : 'fechada');
+    }
+}
+
+
+/**
+ * Fecha a sidebar no mobile (se estiver aberta)
+ */
+function closeSidebarMobile() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+
+    if (sidebar && overlay) {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('active');
+        console.log('[Chat] Sidebar fechada');
+    }
 }
 
 
@@ -989,5 +1113,9 @@ window.Chat = {
     addMessage,
     loadConversation,
     clearMessages,
-    connectWebSocket
+    connectWebSocket,
+    closeSidebarMobile
 };
+
+// Também disponibilizar closeSidebarMobile globalmente para uso em outros scripts
+window.closeSidebarMobile = closeSidebarMobile;
