@@ -7,7 +7,10 @@
  */
 
 // Cache de modelos carregados do servidor
-let modelsCache = [];
+// modelsWithTools: apenas modelos com suporte a function calling (para 1ª e 2ª Instância)
+// allModels: todos os modelos disponíveis (para 3ª Instância)
+let modelsWithToolsCache = [];
+let allModelsCache = [];
 
 // Modelos selecionados para cada instância
 // Esses valores serão usados como fallback na ordem: 1ª → 2ª → 3ª
@@ -34,14 +37,14 @@ const INSTANCE_MAP = {
 
 /**
  * Carrega lista de modelos do servidor
- * Retorna apenas modelos que suportam tool calling
+ * @param {boolean} toolsOnly - Se true, retorna apenas modelos com suporte a tools
  * @returns {Promise<Array>} Lista de modelos disponíveis
  */
-async function loadModels() {
-    console.log('[Models] Carregando modelos do servidor...');
+async function loadModels(toolsOnly = true) {
+    console.log(`[Models] Carregando modelos (tools_only=${toolsOnly})...`);
 
     try {
-        const response = await fetch('/api/models?tools_only=true', {
+        const response = await fetch(`/api/models?tools_only=${toolsOnly}`, {
             headers: Auth.withAuth()
         });
 
@@ -50,15 +53,41 @@ async function loadModels() {
         }
 
         const data = await response.json();
-        modelsCache = data.models || [];
+        const models = data.models || [];
 
-        console.log('[Models] Modelos carregados:', modelsCache.length);
-        return modelsCache;
+        console.log(`[Models] Modelos carregados (tools_only=${toolsOnly}):`, models.length);
+        return models;
 
     } catch (error) {
         console.error('[Models] Erro ao carregar modelos:', error);
         return [];
     }
+}
+
+
+/**
+ * Carrega ambas as listas de modelos (com tools e todos)
+ * @returns {Promise<{withTools: Array, all: Array}>} Objeto com as duas listas
+ */
+async function loadAllModelLists() {
+    console.log('[Models] Carregando listas de modelos...');
+
+    // Carregar em paralelo para melhor performance
+    const [withTools, all] = await Promise.all([
+        loadModels(true),   // Apenas com tools (para 1ª e 2ª Instância)
+        loadModels(false)   // Todos os modelos (para 3ª Instância)
+    ]);
+
+    modelsWithToolsCache = withTools;
+    allModelsCache = all;
+
+    console.log('[Models] Modelos com tools:', modelsWithToolsCache.length);
+    console.log('[Models] Todos os modelos:', allModelsCache.length);
+
+    return {
+        withTools: modelsWithToolsCache,
+        all: allModelsCache
+    };
 }
 
 
@@ -154,9 +183,11 @@ function renderModelOptions(selectElement, models, selectedValue) {
 
 /**
  * Renderiza todos os três seletores de modelo com os modelos carregados
- * @param {Array} models - Lista de modelos disponíveis
+ * 1ª e 2ª Instância: apenas modelos com suporte a tools (function calling)
+ * 3ª Instância: todos os modelos disponíveis
+ * @param {Object} modelLists - Objeto com {withTools: Array, all: Array}
  */
-function renderAllModelSelectors(models) {
+function renderAllModelSelectors(modelLists) {
     console.log('[Models] Renderizando seletores...');
     console.log('[Models] 1ª Instância:', selectedModels.primary);
     console.log('[Models] 2ª Instância:', selectedModels.secondary);
@@ -167,10 +198,13 @@ function renderAllModelSelectors(models) {
     modelSelects.secondary = document.getElementById('model-select-2');
     modelSelects.tertiary = document.getElementById('model-select-3');
 
-    // Renderizar cada seletor com seu valor salvo
-    renderModelOptions(modelSelects.primary, models, selectedModels.primary);
-    renderModelOptions(modelSelects.secondary, models, selectedModels.secondary);
-    renderModelOptions(modelSelects.tertiary, models, selectedModels.tertiary);
+    // 1ª e 2ª Instância: apenas modelos com suporte a tools
+    // (necessário para o agente funcionar corretamente com tool calling)
+    renderModelOptions(modelSelects.primary, modelLists.withTools, selectedModels.primary);
+    renderModelOptions(modelSelects.secondary, modelLists.withTools, selectedModels.secondary);
+
+    // 3ª Instância: todos os modelos (fallback final, pode não usar tools)
+    renderModelOptions(modelSelects.tertiary, modelLists.all, selectedModels.tertiary);
 
     // Adicionar event listeners para mudanças
     if (modelSelects.primary) {
@@ -193,21 +227,21 @@ function renderAllModelSelectors(models) {
  */
 function handleModelChange(instance, modelId) {
     const key = INSTANCE_MAP[instance];
-    
+
     console.log(`[Models] ${instance}ª Instância alterada para:`, modelId);
-    
+
     // Atualizar estado
     selectedModels[key] = modelId;
-    
+
     // Salvar no localStorage
     saveModelsToStorage();
-    
+
     // Emitir evento customizado para notificar outras partes do sistema
     window.dispatchEvent(new CustomEvent('modelsChanged', {
-        detail: { 
+        detail: {
             instance: instance,
             modelId: modelId,
-            allModels: selectedModels 
+            allModels: selectedModels
         }
     }));
 }
@@ -229,11 +263,11 @@ function saveModelsToStorage() {
  */
 function loadModelsFromStorage() {
     const saved = localStorage.getItem('zeus_models');
-    
+
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
-            
+
             // Atualizar apenas as chaves existentes
             if (parsed.primary) {
                 selectedModels.primary = parsed.primary;
@@ -244,7 +278,7 @@ function loadModelsFromStorage() {
             if (parsed.tertiary) {
                 selectedModels.tertiary = parsed.tertiary;
             }
-            
+
             console.log('[Models] Modelos carregados do localStorage');
         } catch (error) {
             console.error('[Models] Erro ao carregar modelos salvos:', error);
@@ -287,13 +321,13 @@ function getSelectedModel(instance = 1) {
 function setSelectedModel(modelId, instance = 1) {
     const key = INSTANCE_MAP[instance] || 'primary';
     selectedModels[key] = modelId;
-    
+
     // Atualizar UI se o select existir
     const select = modelSelects[key];
     if (select) {
         select.value = modelId;
     }
-    
+
     saveModelsToStorage();
 }
 
@@ -310,16 +344,16 @@ async function initModels() {
 
     // Carregar lista de modelos do servidor
     const models = await loadModels();
-    
+
     // Renderizar todos os seletores
     renderAllModelSelectors(models);
-    
+
     console.log('[Models] Inicialização concluída');
 }
 
 
 // Inicializar quando DOM estiver pronto
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // Só inicializa se os seletores existirem na página
     if (document.getElementById('model-select-1')) {
         initModels();
