@@ -244,13 +244,19 @@ function sendMessage(content) {
     showTypingIndicator();
 
     // Enviar via WebSocket
+    // Incluir os três modelos selecionados para o sistema de fallback
+    const selectedModels = Models.getSelectedModels();
     const message = {
         type: 'message',
         content: content,
-        model_id: Models.getSelectedModel()
+        models: {
+            primary: selectedModels.primary,
+            secondary: selectedModels.secondary,
+            tertiary: selectedModels.tertiary
+        }
     };
 
-    console.log('[Chat] Enviando mensagem...');
+    console.log('[Chat] Enviando mensagem com modelos:', selectedModels);
     websocket.send(JSON.stringify(message));
     console.log('[Chat] Mensagem enviada');
 }

@@ -126,7 +126,15 @@ async def websocket_chat(
             
             if msg_type == "message":
                 content = message_data.get("content", "").strip()
-                model_id = message_data.get("model_id", conversation.model_id)
+                
+                # Extrair modelos customizados do frontend (1ª, 2ª e 3ª Instância)
+                # Se não fornecidos, usa os valores padrão do config
+                models_data = message_data.get("models", {})
+                custom_models = {
+                    "primary": models_data.get("primary", settings.primary_model),
+                    "secondary": models_data.get("secondary", settings.secondary_model),
+                    "tertiary": models_data.get("tertiary", settings.secondary_model)
+                }
                 
                 if not content:
                     continue
@@ -135,7 +143,9 @@ async def websocket_chat(
                     "Mensagem recebida",
                     username=username,
                     content_length=len(content),
-                    model_id=model_id
+                    primary_model=custom_models["primary"],
+                    secondary_model=custom_models["secondary"],
+                    tertiary_model=custom_models["tertiary"]
                 )
                 
                 # Verificar rate limit
@@ -153,7 +163,7 @@ async def websocket_chat(
                     content=content
                 )
                 conversation.messages.append(user_message)
-                conversation.model_id = model_id
+                conversation.model_id = custom_models["primary"]  # Guardar modelo primário
                 
                 # Atualizar título se for primeira mensagem
                 if len(conversation.messages) == 1:
@@ -170,13 +180,19 @@ async def websocket_chat(
                 })
                 
                 try:
-                    logger.info("Iniciando processamento com agente", model=model_id)
+                    logger.info(
+                        "Iniciando processamento com agente",
+                        primary=custom_models["primary"],
+                        secondary=custom_models["secondary"],
+                        tertiary=custom_models["tertiary"]
+                    )
                     print(f"[DEBUG] Processando mensagem: {content[:50]}...")
                     
-                    # Processar com o agente
+                    # Processar com o agente, passando modelos customizados
                     response = await orchestrator.process_message(
                         conversation=conversation,
-                        websocket=websocket
+                        websocket=websocket,
+                        custom_models=custom_models
                     )
                     
                     print(f"[DEBUG] Resposta recebida: {str(response)[:100]}...")

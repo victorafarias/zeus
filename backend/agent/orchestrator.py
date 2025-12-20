@@ -42,8 +42,8 @@ class AgentOrchestrator:
     Orquestrador principal do agente Zeus.
     
     Gerencia:
-    - Comunicação com OpenRouter (modelos primário e secundário)
-    - Fallback automático entre modelos
+    - Comunicação com OpenRouter (modelos 1ª, 2ª e 3ª Instância)
+    - Fallback automático entre modelos: 1ª → 2ª → 3ª Instância
     - Execução de tools
     - Ciclo de tool calling (múltiplas iterações)
     """
@@ -53,16 +53,21 @@ class AgentOrchestrator:
         self.client = get_openrouter_client()
         self.tools = get_all_tools()
         
-        # Modelos configurados
-        self.primary_model = settings.primary_model
+        # Modelos padrão (usados se não fornecidos via frontend)
+        self.default_primary_model = settings.primary_model
+        self.default_secondary_model = settings.secondary_model
+        self.default_tertiary_model = settings.secondary_model  # Usar secundário como fallback
+        
+        # Timeouts para cada nível
         self.primary_timeout = settings.primary_model_timeout
-        self.secondary_model = settings.secondary_model
         self.secondary_timeout = settings.secondary_model_timeout
+        self.tertiary_timeout = settings.secondary_model_timeout  # Mesmo timeout do secundário
         
         logger.info(
             "Orquestrador inicializado",
-            primary_model=self.primary_model,
-            secondary_model=self.secondary_model,
+            default_primary=self.default_primary_model,
+            default_secondary=self.default_secondary_model,
+            default_tertiary=self.default_tertiary_model,
             tools_count=len(self.tools)
         )
     
@@ -194,27 +199,39 @@ class AgentOrchestrator:
     async def process_message(
         self,
         conversation,
-        websocket: Optional[WebSocket] = None
+        websocket: Optional[WebSocket] = None,
+        custom_models: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """
         Processa uma mensagem do usuário e retorna resposta.
         
-        Implementa o ciclo de tool calling:
-        1. Envia mensagem para o modelo
-        2. Se modelo solicitar tool, executa e envia resultado
-        3. Repete até resposta final
+        Implementa o ciclo de tool calling com fallback 1ª → 2ª → 3ª Instância:
+        1. Envia mensagem para o modelo da 1ª Instância
+        2. Se falhar, tenta 2ª Instância
+        3. Se falhar, tenta 3ª Instância
+        4. Se modelo solicitar tool, executa e envia resultado
+        5. Repete até resposta final
         
         Args:
             conversation: Objeto Conversation com mensagens
             websocket: WebSocket para enviar atualizações em tempo real
+            custom_models: Modelos customizados {primary, secondary, tertiary}
             
         Returns:
             Dicionário com resposta final
         """
+        # Determinar modelos a usar (customizados ou padrão)
+        models = custom_models or {}
+        primary_model = models.get("primary", self.default_primary_model)
+        secondary_model = models.get("secondary", self.default_secondary_model)
+        tertiary_model = models.get("tertiary", self.default_tertiary_model)
+        
         logger.info(
             "Processando mensagem",
             conversation_id=conversation.id,
-            model_id=conversation.model_id
+            primary_model=primary_model,
+            secondary_model=secondary_model,
+            tertiary_model=tertiary_model
         )
         
         # Buscar contexto do RAG
@@ -260,51 +277,73 @@ class AgentOrchestrator:
             )
             await self._send_log_feedback(websocket, f"Iteração do agente ({iteration})")
             
-            # Enviar para o modelo primário primeiro, com fallback para secundário
+            # Fallback: 1ª Instância → 2ª Instância → 3ª Instância
             await self._send_log_feedback(
                 websocket, 
-                f"Enviando para modelo primário ({self.primary_model})"
+                f"Enviando para 1ª Instância ({primary_model})"
             )
             
-            # Tentar modelo primário (com retry interno)
+            # Tentar 1ª Instância (modelo primário)
             response = await self._call_model_with_retry(
-                model=self.primary_model,
+                model=primary_model,
                 messages=messages,
                 tools=self.tools if self.tools else None,
                 timeout=self.primary_timeout
             )
             
             if response:
-                logger.info("Resposta do modelo primário recebida", model=self.primary_model)
+                logger.info("Resposta da 1ª Instância recebida", model=primary_model)
             else:
-                # Falha no primário -> Tentar secundário
+                # Falha na 1ª Instância → Tentar 2ª Instância
                 logger.warning(
-                    "Falha no modelo primário, tentando secundário",
-                    primary_model=self.primary_model
+                    "Falha na 1ª Instância, tentando 2ª Instância",
+                    primary_model=primary_model,
+                    secondary_model=secondary_model
                 )
                 await self._send_log_feedback(
                     websocket,
-                    f"Erro em {self.primary_model}, tentando {self.secondary_model}"
+                    f"Erro em {primary_model}, tentando 2ª Instância ({secondary_model})"
                 )
                 
                 response = await self._call_model_with_retry(
-                    model=self.secondary_model,
+                    model=secondary_model,
                     messages=messages,
                     tools=self.tools if self.tools else None,
                     timeout=self.secondary_timeout
                 )
                 
                 if response:
-                    logger.info("Resposta do modelo secundário recebida", model=self.secondary_model)
+                    logger.info("Resposta da 2ª Instância recebida", model=secondary_model)
                 else:
-                    # Falha total
-                    error_msg = f"Erro: Ambos os modelos ({self.primary_model}, {self.secondary_model}) falharam em responder."
-                    logger.error("Falha em todos os modelos")
-                    await self._send_log_feedback(websocket, "Erro: Falha em todos os modelos")
-                    return {
-                        "content": error_msg,
-                        "role": "assistant"
-                    }
+                    # Falha na 2ª Instância → Tentar 3ª Instância
+                    logger.warning(
+                        "Falha na 2ª Instância, tentando 3ª Instância",
+                        secondary_model=secondary_model,
+                        tertiary_model=tertiary_model
+                    )
+                    await self._send_log_feedback(
+                        websocket,
+                        f"Erro em {secondary_model}, tentando 3ª Instância ({tertiary_model})"
+                    )
+                    
+                    response = await self._call_model_with_retry(
+                        model=tertiary_model,
+                        messages=messages,
+                        tools=self.tools if self.tools else None,
+                        timeout=self.tertiary_timeout
+                    )
+                    
+                    if response:
+                        logger.info("Resposta da 3ª Instância recebida", model=tertiary_model)
+                    else:
+                        # Falha total em todas as instâncias
+                        error_msg = f"Erro: Todos os modelos falharam (1ª: {primary_model}, 2ª: {secondary_model}, 3ª: {tertiary_model})"
+                        logger.error("Falha em todas as instâncias")
+                        await self._send_log_feedback(websocket, "Erro: Falha em todas as instâncias")
+                        return {
+                            "content": error_msg,
+                            "role": "assistant"
+                        }
             
             # Resposta recebida
             await self._send_log_feedback(websocket, "Resposta recebida")
