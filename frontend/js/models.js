@@ -342,11 +342,13 @@ async function initModels() {
     // Recuperar modelos salvos do localStorage
     loadModelsFromStorage();
 
-    // Carregar lista de modelos do servidor
-    const models = await loadModels();
+    // Carregar ambas as listas de modelos do servidor
+    // - withTools: para 1ª e 2ª Instância (necessário para tool calling)
+    // - all: para 3ª Instância (fallback final)
+    const modelLists = await loadAllModelLists();
 
-    // Renderizar todos os seletores
-    renderAllModelSelectors(models);
+    // Renderizar todos os seletores com as listas apropriadas
+    renderAllModelSelectors(modelLists);
 
     console.log('[Models] Inicialização concluída');
 }
