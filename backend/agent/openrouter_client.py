@@ -123,6 +123,29 @@ class OpenRouterClient:
                 )
                 content = "Erro: O modelo retornou uma resposta vazia. Verifique se o nome do modelo está correto."
             
+            # Detectar tool calls malformados no texto (modelo tentando gerar XML/texto bruto)
+            # Isso acontece quando modelos não suportam bem tool calling
+            malformed_tool_patterns = [
+                "function_calls>",
+                "<invoke",
+                "<parameter",
+                "name=\"execute_shell\"",
+                "name=\"search_procedures\"",
+                "name=\"manage_rag\"",
+                "<function_call>",
+                "</function_call>",
+            ]
+            
+            is_malformed_tool_call = any(pattern in content for pattern in malformed_tool_patterns)
+            
+            if is_malformed_tool_call and not message.tool_calls:
+                logger.warning(
+                    "Detectada tentativa de tool call via texto (modelo não suporta tool calling corretamente)",
+                    model=model,
+                    content_preview=content[:200]
+                )
+                content = "Erro: O modelo gerou tool calls malformados. Será feito fallback para outro modelo."
+            
             result = {
                 "content": content,
                 "role": message.role,
