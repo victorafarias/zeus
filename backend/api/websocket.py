@@ -249,11 +249,11 @@ async def websocket_chat(
                     continue
                 
                 # Adicionar mensagem do usuário à conversa
-                # Nota: Usamos 'content' (sem arquivos) para salvar, mas 'full_content' é usado internamente
-                # Isso evita salvar contexto de arquivos gigantes na conversa persistida
+                # IMPORTANTE: Usamos 'full_content' (com arquivos) para enviar ao agente
+                # Depois, restauramos para 'content' antes de salvar
                 user_message = Message(
                     role="user",
-                    content=content  # Salva apenas o texto original
+                    content=full_content  # Inclui contexto dos arquivos para o agente
                 )
                 # Guardar referência aos arquivos anexados (se houver)
                 if attached_files:
@@ -306,6 +306,10 @@ async def websocket_chat(
                     # Atualizar timestamp
                     from datetime import datetime
                     conversation.updated_at = datetime.utcnow()
+                    
+                    # Restaurar conteúdo original (sem arquivos) antes de salvar
+                    # Isso evita persistir o contexto grande dos arquivos
+                    user_message.content = content  # Volta para o texto original
                     
                     # Salvar conversa
                     save_conversation(conversation)
