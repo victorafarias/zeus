@@ -26,6 +26,24 @@ BLOCKED_COMMANDS = [
     "chown -R",
 ]
 
+# Padrões que podem matar o próprio backend Zeus (BLOQUEADOS)
+# Esses comandos matariam o processo uvicorn/python que roda o backend
+SELF_DESTRUCTIVE_PATTERNS = [
+    "pkill -f uvicorn",
+    "pkill uvicorn",
+    "killall uvicorn",
+    "pkill -f main:app",
+    "kill -9 1",           # PID 1 é o uvicorn no container
+    "kill 1",              # PID 1 é o uvicorn no container
+    "killall python3.11",  # Pode matar o backend
+    "killall python",      # Pode matar o backend
+    "pkill -f python3.11",
+    "pkill python",
+    "docker stop zeus",
+    "docker kill zeus",
+    "docker restart zeus",
+]
+
 # Comandos que requerem confirmação (não bloqueados, mas alertados)
 DANGEROUS_PATTERNS = [
     "rm -rf",
@@ -102,6 +120,20 @@ Para tarefas longas (downloads, instalações), aumente o timeout."""
                     command=command[:100]
                 )
                 return self._error(f"Comando bloqueado por segurança: {blocked}")
+        
+        # Verificar comandos que matariam o próprio backend
+        for pattern in SELF_DESTRUCTIVE_PATTERNS:
+            if pattern.lower() in command_lower:
+                logger.warning(
+                    "Comando autodestrutivo bloqueado",
+                    command=command[:100],
+                    pattern=pattern
+                )
+                return self._error(
+                    f"Comando bloqueado: '{pattern}' mataria o próprio backend Zeus. "
+                    f"Para matar um processo específico, use 'kill <PID>' com o PID exato "
+                    f"(não use PID 1 que é o uvicorn principal)."
+                )
         
         # Alertar sobre comandos perigosos
         is_dangerous = any(
