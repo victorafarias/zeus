@@ -17,6 +17,7 @@ class ToolParameter(BaseModel):
     description: str
     required: bool = True
     enum: Optional[List[str]] = None  # Valores permitidos
+    items: Optional[Dict[str, str]] = None  # Tipo dos itens para arrays (ex: {"type": "string"})
 
 
 class BaseTool(ABC):
@@ -57,6 +58,14 @@ class BaseTool(ABC):
             
             if param.enum:
                 prop["enum"] = param.enum
+            
+            # Adicionar 'items' para arrays (obrigatório pela API OpenAI)
+            if param.type == "array":
+                if param.items:
+                    prop["items"] = param.items
+                else:
+                    # Padrão: array de strings se não especificado
+                    prop["items"] = {"type": "string"}
             
             properties[param.name] = prop
             

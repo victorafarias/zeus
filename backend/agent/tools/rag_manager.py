@@ -65,7 +65,8 @@ NOTA: Para busca semântica, use a tool 'search_procedures'."""
             name="tags",
             type="array",
             description="Lista de tags para categorização (para action='add')",
-            required=False
+            required=False,
+            items={"type": "string"}  # Especifica que o array contém strings
         ),
         ToolParameter(
             name="limit",
