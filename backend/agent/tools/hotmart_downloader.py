@@ -1,7 +1,7 @@
 """
 =====================================================
 ZEUS - Hotmart Downloader Tool
-Baixa vídeos de links Hotmart usando FFmpeg
+Baixa vídeos e áudios de links Hotmart usando FFmpeg e yt-dlp
 =====================================================
 """
 
@@ -18,12 +18,20 @@ from config import get_settings, get_logger
 logger = get_logger(__name__)
 settings = get_settings()
 
+
 class HotmartDownloaderTool(BaseTool):
-    """Baixa vídeos de links do Hotmart usando FFmpeg headers específicos"""
+    """
+    Baixa vídeos (MP4) ou extrai áudios (MP3) de links do Hotmart.
+    - Vídeo: Usa FFmpeg com headers específicos
+    - Áudio: Usa yt-dlp com pós-processamento FFmpeg para extração MP3
+    """
     
     name = "hotmart_downloader"
-    description = """Baixa vídeos de links do Hotmart ('contentplayer.hotmart.com' ou 'vod-akm.play.hotmart.com').
-Recebe a URL do vídeo (m3u8 ou link direto) e baixa o arquivo mp4 processado.
+    description = """Baixa vídeos ou áudios de links do Hotmart ('contentplayer.hotmart.com' ou 'vod-akm.play.hotmart.com').
+Recebe a URL do vídeo (m3u8 ou link direto) e baixa como MP4 (vídeo) ou MP3 (áudio).
+Use format='video' (padrão) para vídeo MP4
+
+Use format='audio' para extrair apenas o áudio em MP3.
 Requer FFmpeg instalado no sistema."""
     
     parameters = [
@@ -35,7 +43,13 @@ Requer FFmpeg instalado no sistema."""
         ToolParameter(
             name="output_filename",
             type="string",
-            description="Nome do arquivo de saída (opcional). Se não fornecido, gera um nome aleatório.",
+            description="Nome do arquivo de saída (opcional). Se não fornecido, gera um nome aleatório. Não inclua a extensão, será adicionada automaticamente.",
+            required=False
+        ),
+        ToolParameter(
+            name="format",
+            type="string",
+            description="Formato de saída: 'video' para MP4 (padrão) ou 'audio' para MP3",
             required=False
         )
     ]
@@ -44,63 +58,112 @@ Requer FFmpeg instalado no sistema."""
         self,
         url: str,
         output_filename: str = None,
+        format: str = "video",
         **kwargs
     ) -> Dict[str, Any]:
-        """Executa o download do vídeo"""
+        """
+        Executa o download do conteúdo (vídeo ou áudio).
         
-        # 1. Validar URL (básico)
+        Args:
+            url: URL do conteúdo Hotmart
+            output_filename: Nome do arquivo de saída (sem extensão)
+            format: 'video' para MP4 ou 'audio' para MP3
+        """
+        
+        # 1. Validar parâmetros
         if not url:
             return self._error("URL não fornecida.")
+        
+        # Normalizar o formato para minúsculas
+        format = format.lower().strip() if format else "video"
+        if format not in ["video", "audio"]:
+            return self._error(f"Formato inválido: '{format}'. Use 'video' ou 'audio'.")
             
-        # 2. Verificar FFmpeg
+        # 2. Verificar FFmpeg (obrigatório para ambos os formatos)
         if not shutil.which("ffmpeg"):
             return self._error("FFmpeg não encontrado no sistema. Por favor, instale o FFmpeg.")
+        
+        # 3. Para áudio, verificar se yt-dlp está disponível
+        if format == "audio":
+            try:
+                # Importar yt-dlp dinamicamente para evitar erro se não instalado
+                from yt_dlp import YoutubeDL
+            except ImportError:
+                return self._error(
+                    "yt-dlp não está instalado. Execute 'pip install yt-dlp' para habilitar download de áudio."
+                )
             
-        # 3. Definir caminho de saída
-        # Salvar em /outputs por padrão
+        # 4. Definir caminho de saída
         output_dir = settings.outputs_dir
         if not os.path.exists(output_dir):
             try:
                 os.makedirs(output_dir, exist_ok=True)
             except Exception as e:
                 return self._error(f"Não foi possível criar diretório de saída: {str(e)}")
-                
+        
+        # 5. Definir extensão e nome do arquivo
+        extension = ".mp3" if format == "audio" else ".mp4"
+        
         if not output_filename:
-            # Gerar nome único
-            output_filename = f"hotmart_video_{uuid.uuid4().hex[:8]}.mp4"
-            
-        if not output_filename.endswith(".mp4"):
-            output_filename += ".mp4"
+            # Gerar nome único baseado no formato
+            prefix = "hotmart_audio" if format == "audio" else "hotmart_video"
+            output_filename = f"{prefix}_{uuid.uuid4().hex[:8]}"
+        else:
+            # Limpar extensões existentes do nome do arquivo
+            output_filename = output_filename.replace(".mp4", "").replace(".mp3", "").replace(".m4a", "")
+        
+        # Adicionar extensão correta
+        if not output_filename.endswith(extension):
+            output_filename += extension
             
         full_output_path = os.path.join(output_dir, output_filename)
         
+        # Verificar se já existe e gerar novo nome se necessário
         if os.path.exists(full_output_path):
-             # Se já existe, tenta gerar outro nome para não sobrescrever acidentalmente
-             base, ext = os.path.splitext(output_filename)
-             output_filename = f"{base}_{uuid.uuid4().hex[:4]}{ext}"
-             full_output_path = os.path.join(output_dir, output_filename)
+            base, ext = os.path.splitext(output_filename)
+            output_filename = f"{base}_{uuid.uuid4().hex[:4]}{ext}"
+            full_output_path = os.path.join(output_dir, output_filename)
 
-        logger.info("Iniciando download Hotmart", url=url, output=full_output_path)
+        logger.info(
+            "Iniciando download Hotmart",
+            url=url,
+            format=format,
+            output=full_output_path
+        )
         
-        # 4. Executar download em thread separada
+        # 6. Executar download de acordo com o formato
         try:
-            result = await asyncio.to_thread(
-                self._download_synchronously,
-                url,
-                full_output_path
-            )
+            if format == "audio":
+                result = await asyncio.to_thread(
+                    self._download_audio_synchronously,
+                    url,
+                    full_output_path
+                )
+            else:
+                result = await asyncio.to_thread(
+                    self._download_video_synchronously,
+                    url,
+                    full_output_path
+                )
             return self._success(result)
             
         except Exception as e:
-            logger.error("Erro no download Hotmart", error=str(e))
-            return self._error(f"Falha ao baixar vídeo: {str(e)}")
+            logger.error("Erro no download Hotmart", error=str(e), format=format)
+            return self._error(f"Falha ao baixar {format}: {str(e)}")
 
 
-    def _download_synchronously(self, url: str, output_path: str) -> str:
-        """Executa o comando FFmpeg (bloqueante)"""
+    def _download_video_synchronously(self, url: str, output_path: str) -> str:
+        """
+        Executa o download de VÍDEO usando FFmpeg (bloqueante).
+        Mantém o comportamento original para compatibilidade.
+        """
         
         # Headers necessários para Hotmart
-        headers = "Referer: https://cf-embed.play.hotmart.com/\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36\r\n"
+        headers = (
+            "Referer: https://cf-embed.play.hotmart.com/\r\n"
+            "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36\r\n"
+        )
         
         command = [
             'ffmpeg',
@@ -108,12 +171,12 @@ Requer FFmpeg instalado no sistema."""
             '-i', url,
             '-c', 'copy',
             '-bsf:a', 'aac_adtstoasc',
-            '-y', # Sobrescrever se existir (já tratamos nome antes, mas por segurança do ffmpeg)
+            '-y',  # Sobrescrever se existir
             output_path
         ]
         
-        # Executar
-        # Capture_output=True para não sujar o log principal, mas se falhar pegamos o stderr
+        logger.debug("Executando comando FFmpeg para vídeo", command=" ".join(command[:3]) + "...")
+        
         try:
             process = subprocess.run(
                 command,
@@ -122,9 +185,83 @@ Requer FFmpeg instalado no sistema."""
                 stderr=subprocess.PIPE,
                 text=True
             )
-            return f"Download concluído com sucesso! Vídeo salvo em: {output_path}"
+            logger.info("Download de vídeo concluído", output=output_path)
+            return f"✅ Download concluído com sucesso! Vídeo salvo em: {output_path}"
             
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr if e.stderr else str(e)
             raise Exception(f"Erro do FFmpeg: {error_msg}")
+
+
+    def _download_audio_synchronously(self, url: str, output_path: str) -> str:
+        """
+        Executa o download de ÁUDIO usando yt-dlp + FFmpeg (bloqueante).
+        Extrai apenas o áudio e converte para MP3.
+        """
+        from yt_dlp import YoutubeDL
+        from yt_dlp.utils import DownloadError
+        
+        # Obter diretório e nome base do arquivo
+        output_dir = os.path.dirname(output_path)
+        nome_arquivo_limpo = os.path.basename(output_path).replace(".mp3", "")
+        
+        # Configurações do yt-dlp para extração de áudio
+        ydl_opts = {
+            # Buscar melhor áudio disponível
+            'format': 'bestaudio/best',
+            
+            # Template de saída (sem extensão, yt-dlp adiciona após conversão)
+            'outtmpl': os.path.join(output_dir, nome_arquivo_limpo),
+            
+            # Pós-processadores para converter para MP3
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',  # 192kbps, boa qualidade
+            }],
+            
+            # Headers específicos do Hotmart
+            'referer': 'https://cf-embed.play.hotmart.com/',
+            'http_headers': {
+                'User-Agent': (
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                    'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                ),
+            },
+            
+            # Configurações de log
+            'quiet': True,
+            'noprogress': False,
+            
+            # Ignorar erros de certificado em alguns casos
+            'nocheckcertificate': True,
+        }
+        
+        logger.debug(
+            "Iniciando extração de áudio com yt-dlp",
+            output_template=ydl_opts['outtmpl']
+        )
+        
+        try:
+            with YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            
+            # Verificar se o arquivo foi criado
+            if os.path.exists(output_path):
+                logger.info("Download de áudio concluído", output=output_path)
+                return f"✅ Áudio extraído com sucesso! MP3 salvo em: {output_path}"
+            else:
+                # Às vezes o yt-dlp salva com extensão diferente, vamos verificar
+                alternative_path = output_path.replace(".mp3", ".opus")
+                if os.path.exists(alternative_path):
+                    return f"✅ Áudio extraído! Arquivo salvo em: {alternative_path}"
+                    
+                return f"✅ Áudio processado! Verifique a pasta: {output_dir}"
+                
+        except DownloadError as e:
+            logger.error("Erro de download yt-dlp", error=str(e))
+            raise Exception(f"Falha no download: {e}")
+        except Exception as e:
+            logger.error("Erro inesperado na extração de áudio", error=str(e))
+            raise Exception(f"Erro inesperado: {e}")
 

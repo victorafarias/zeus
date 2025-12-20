@@ -108,6 +108,13 @@ async def websocket_chat(
     # Criar orquestrador do agente
     orchestrator = AgentOrchestrator()
     
+    # Estado de cancelamento compartilhado entre WebSocket e orquestrador
+    # Usado para sinalizar ao processamento que deve ser cancelado
+    cancel_state = {
+        "cancelled": False,
+        "active_process": None  # Armazena processo shell ativo (se houver)
+    }
+    
     try:
         while True:
             # Receber mensagem do cliente
@@ -124,6 +131,38 @@ async def websocket_chat(
             
             msg_type = message_data.get("type", "message")
             
+            # -------------------------------------------------
+            # Handler para mensagem de CANCELAMENTO
+            # -------------------------------------------------
+            if msg_type == "cancel":
+                logger.info(
+                    "Solicitação de cancelamento recebida",
+                    username=username,
+                    conversation_id=conversation.id if conversation else None
+                )
+                
+                # Sinalizar cancelamento
+                cancel_state["cancelled"] = True
+                
+                # Se houver processo shell ativo, tentar matar
+                if cancel_state.get("active_process"):
+                    try:
+                        cancel_state["active_process"].kill()
+                        logger.info("Processo shell ativo cancelado")
+                    except Exception as e:
+                        logger.warning("Erro ao matar processo", error=str(e))
+                
+                # Notificar cliente
+                await websocket.send_json({
+                    "type": "cancelled",
+                    "content": "Processamento cancelado pelo usuário."
+                })
+                
+                # Reset do flag para próxima mensagem
+                cancel_state["cancelled"] = False
+                cancel_state["active_process"] = None
+                continue
+            
             if msg_type == "message":
                 content = message_data.get("content", "").strip()
                 
@@ -138,6 +177,10 @@ async def websocket_chat(
                 
                 if not content:
                     continue
+                
+                # Reset do estado de cancelamento para nova mensagem
+                cancel_state["cancelled"] = False
+                cancel_state["active_process"] = None
                 
                 logger.info(
                     "Mensagem recebida",
@@ -188,11 +231,12 @@ async def websocket_chat(
                     )
                     print(f"[DEBUG] Processando mensagem: {content[:50]}...")
                     
-                    # Processar com o agente, passando modelos customizados
+                    # Processar com o agente, passando modelos customizados e cancel_state
                     response = await orchestrator.process_message(
                         conversation=conversation,
                         websocket=websocket,
-                        custom_models=custom_models
+                        custom_models=custom_models,
+                        cancel_state=cancel_state
                     )
                     
                     print(f"[DEBUG] Resposta recebida: {str(response)[:100]}...")

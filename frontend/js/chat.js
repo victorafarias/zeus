@@ -18,6 +18,7 @@ let messagesDiv = null;
 let welcomeScreen = null;
 let messageInput = null;
 let btnSend = null;
+let btnCancel = null;
 let typingIndicator = null;
 let connectionStatus = null;
 
@@ -132,7 +133,18 @@ function handleWebSocketMessage(event) {
                 // Mensagem completa do assistente
                 hideTypingIndicator();
                 hideToolModal(); // Garantir que modal está fechado
+                hideCancelButton(); // Esconder botão de cancelar
                 addMessage('assistant', data.content, data.tool_calls);
+                isProcessing = false;
+                enableInput();
+                break;
+
+            case 'cancelled':
+                // Processamento foi cancelado pelo usuário
+                hideTypingIndicator();
+                hideToolModal();
+                hideCancelButton();
+                addMessage('system', `⛔ ${data.content || 'Processamento cancelado pelo usuário.'}`);
                 isProcessing = false;
                 enableInput();
                 break;
@@ -170,6 +182,7 @@ function handleWebSocketMessage(event) {
             case 'error':
                 hideTypingIndicator();
                 hideToolModal();
+                hideCancelButton();
                 addMessage('system', `❌ ${data.content}`);
                 isProcessing = false;
                 enableInput();
@@ -240,8 +253,9 @@ function sendMessage(content) {
     disableInput();
     isProcessing = true;
 
-    // Mostrar indicador de digitação
+    // Mostrar indicador de digitação e botão de cancelar
     showTypingIndicator();
+    showCancelButton();
 
     // Enviar via WebSocket
     // Incluir os três modelos selecionados para o sistema de fallback
@@ -536,6 +550,56 @@ function enableInput() {
 
 
 /**
+ * Mostra botão de cancelar
+ */
+function showCancelButton() {
+    if (btnCancel) {
+        btnCancel.hidden = false;
+        btnCancel.style.display = 'flex';
+        console.log('[Chat] Botão de cancelar exibido');
+    }
+}
+
+
+/**
+ * Esconde botão de cancelar
+ */
+function hideCancelButton() {
+    if (btnCancel) {
+        btnCancel.hidden = true;
+        btnCancel.style.display = 'none';
+        console.log('[Chat] Botão de cancelar escondido');
+    }
+}
+
+
+/**
+ * Cancela o processamento atual
+ */
+function cancelProcessing() {
+    if (!isProcessing) {
+        console.log('[Chat] Nenhum processamento em andamento para cancelar');
+        return;
+    }
+
+    if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+        console.error('[Chat] WebSocket não está conectado');
+        return;
+    }
+
+    console.log('[Chat] Enviando solicitação de cancelamento...');
+
+    // Enviar mensagem de cancelamento
+    websocket.send(JSON.stringify({
+        type: 'cancel'
+    }));
+
+    // Feedback visual imediato
+    showTypingIndicator('Cancelando processamento...');
+}
+
+
+/**
  * Auto-resize do textarea
  * @param {HTMLTextAreaElement} textarea
  */
@@ -557,12 +621,19 @@ function initChat() {
     welcomeScreen = document.getElementById('welcome-screen');
     messageInput = document.getElementById('message-input');
     btnSend = document.getElementById('btn-send');
+    btnCancel = document.getElementById('btn-cancel');
     typingIndicator = document.getElementById('typing-indicator');
     connectionStatus = document.getElementById('connection-status');
 
-    // Garantir que modais estejam escondidos ao iniciar
+    // Garantir que modais e botão de cancelar estejam escondidos ao iniciar
     hideToolModal();
     hideTypingIndicator();
+    hideCancelButton();
+
+    // Event listener para botão de cancelar
+    if (btnCancel) {
+        btnCancel.addEventListener('click', cancelProcessing);
+    }
 
     // Formulário de mensagem
     const messageForm = document.getElementById('message-form');

@@ -200,7 +200,8 @@ class AgentOrchestrator:
         self,
         conversation,
         websocket: Optional[WebSocket] = None,
-        custom_models: Optional[Dict[str, str]] = None
+        custom_models: Optional[Dict[str, str]] = None,
+        cancel_state: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Processa uma mensagem do usuário e retorna resposta.
@@ -216,6 +217,7 @@ class AgentOrchestrator:
             conversation: Objeto Conversation com mensagens
             websocket: WebSocket para enviar atualizações em tempo real
             custom_models: Modelos customizados {primary, secondary, tertiary}
+            cancel_state: Estado de cancelamento compartilhado {cancelled: bool, active_process: processo}
             
         Returns:
             Dicionário com resposta final
@@ -269,6 +271,20 @@ class AgentOrchestrator:
         
         while iteration < max_iterations:
             iteration += 1
+            
+            # -------------------------------------------------
+            # VERIFICAÇÃO DE CANCELAMENTO
+            # -------------------------------------------------
+            if cancel_state and cancel_state.get("cancelled"):
+                logger.info(
+                    "Processamento cancelado pelo usuário",
+                    iteration=iteration
+                )
+                return {
+                    "content": "Processamento cancelado pelo usuário.",
+                    "role": "assistant",
+                    "cancelled": True
+                }
             
             logger.info(
                 "Iteração do agente",
@@ -399,6 +415,9 @@ class AgentOrchestrator:
                     await self._send_log_feedback(websocket, f"Executando: {tool_name}")
                     
                     tool_args["websocket"] = websocket
+                    
+                    # Passar cancel_state para tools que precisam verificar cancelamento
+                    tool_args["cancel_state"] = cancel_state
 
                     # Heartbeat task para feedback constante
                     async def heartbeat(ws):

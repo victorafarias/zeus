@@ -204,6 +204,11 @@ Para tarefas longas (downloads, instalações), aumente o timeout."""
                 cwd=working_dir
             )
             
+            # Armazenar processo no cancel_state para permitir cancelamento externo
+            cancel_state = kwargs.get('cancel_state')
+            if cancel_state:
+                cancel_state['active_process'] = process
+            
             stdout_buffer = []
             stderr_buffer = []
 
@@ -276,6 +281,10 @@ Para tarefas longas (downloads, instalações), aumente o timeout."""
                 "Shell executado com sucesso",
                 output_length=len(output)
             )
+            
+            # Limpar processo do cancel_state após término
+            if cancel_state:
+                cancel_state['active_process'] = None
             
             return self._success(output or "(sem saída)")
             
