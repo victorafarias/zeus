@@ -18,6 +18,8 @@ from .hotmart_downloader import HotmartDownloaderTool
 from .external_model_tool import ExternalModelTool
 from .rag_manager import RAGManagerTool
 from .ssh_tunnel_publisher import SSHTunnelPublisherTool
+from .yt_downloader import YouTubeDownloaderTool
+from .yt_transcriber import YouTubeTranscriberTool
 
 from config import get_logger
 
@@ -44,6 +46,8 @@ TOOLS: List[BaseTool] = [
     ExternalModelTool(),
     RAGManagerTool(),
     SSHTunnelPublisherTool(),
+    YouTubeDownloaderTool(),
+    YouTubeTranscriberTool(),
 ]
 
 # Dicionário para acesso rápido por nome
