@@ -22,7 +22,7 @@ settings = get_settings()
 class YouTubeDownloaderTool(BaseTool):
     """
     Baixa vídeos (MP4) ou extrai áudios (MP3) de links do YouTube.
-    Utiliza yt-dlp com pós-processamento FFmpeg para conversão.
+    Utiliza yt-dlp como primeira opção, pytubefix como fallback e pytube como última opção.
     """
     
     name = "yt_download"
@@ -30,7 +30,7 @@ class YouTubeDownloaderTool(BaseTool):
 Use format='video' (padrão) para baixar vídeo MP4 ou format='audio' para extrair apenas o áudio em MP3.
 Parâmetro quality permite escolher qualidade do vídeo: 'best', '720p', '480p', '360p'.
 O arquivo será salvo na pasta /outputs.
-Requer FFmpeg instalado no sistema.
+Tenta usar na ordem: yt-dlp -> pytubefix -> pytube.
 
 Para vídeos com restrição de idade ou que exigem login, use o parâmetro cookies_text com o conteúdo do arquivo cookies.txt exportado do navegador (formato Netscape)."""
     
@@ -187,6 +187,7 @@ Para vídeos com restrição de idade ou que exigem login, use o parâmetro cook
         
         # 6. Executar download em thread separada
         try:
+            # Tentar com yt-dlp primeiro
             result = await asyncio.to_thread(
                 self._download_synchronously,
                 url,
@@ -201,7 +202,43 @@ Para vídeos com restrição de idade ou que exigem login, use o parâmetro cook
             
         except Exception as e:
             error_str = str(e)
-            logger.error("Erro no download YouTube", error=error_str)
+            logger.warning(f"Falha com yt-dlp, tentando fallback com pytubefix: {error_str}")
+            report_progress("⚠️ Falha com yt-dlp, tentando método alternativo (pytubefix)...")
+            
+            try:
+                # Fallback par pytubefix
+                result = await asyncio.to_thread(
+                    self._download_with_pytubefix,
+                    url,
+                    format,
+                    output_filename,
+                    output_dir,
+                    effective_cookies_file,
+                    report_progress
+                )
+                return self._success(result)
+            except Exception as e_fallback:
+                fallback_error = str(e_fallback)
+                logger.warning(f"Falha também no chatbot pytubefix: {fallback_error}")
+                report_progress("⚠️ Falha com pytubefix, tentando último recurso (pytube)...")
+                
+                try:
+                    # Último recurso: pytube
+                    result = await asyncio.to_thread(
+                        self._download_with_pytube,
+                        url,
+                        format,
+                        output_filename,
+                        output_dir,
+                        progress_callback
+                    )
+                    return self._success(result)
+                except Exception as e_last_resort:
+                    last_resort_error = str(e_last_resort)
+                    logger.error(f"Falha final com pytube: {last_resort_error}")
+            
+            # Se todos falharem, retornar erro detalhado do yt-dlp
+            logger.error("Erro no download YouTube (todos métodos falharam)", error=error_str)
             
             # Detectar erro de restrição de idade e dar orientação
             age_restricted_keywords = [
@@ -212,7 +249,7 @@ Para vídeos com restrição de idade ou que exigem login, use o parâmetro cook
             
             if is_age_restricted and not effective_cookies_file:
                 return self._error(
-                    f"Falha no download: {error_str}\n\n"
+                    f"Falha no download (yt-dlp/pytubefix/pytube): {error_str}\n\n"
                     "🔒 **Este vídeo requer autenticação (restrição de idade/login).**\n\n"
                     "Para resolver, o usuário deve:\n"
                     "1. Instalar a extensão 'Get cookies.txt LOCALLY' no Chrome/Edge\n"
@@ -224,7 +261,7 @@ Para vídeos com restrição de idade ou que exigem login, use o parâmetro cook
                     "`yt-dlp --cookies-from-browser chrome --cookies cookies.txt 'URL'`"
                 )
             
-            return self._error(f"Falha no download: {error_str}")
+            return self._error(f"Falha no download:\nyt-dlp: {error_str}\npytubefix: {fallback_error}\npytube: {last_resort_error}")
         finally:
             # Limpar arquivo temporário de cookies após o download
             if temp_cookies_file and os.path.exists(temp_cookies_file):
@@ -498,4 +535,209 @@ Para vídeos com restrição de idade ou que exigem login, use o parâmetro cook
         except Exception as e:
             logger.warning("Erro ao procurar arquivo baixado", error=str(e))
         
-        return f"✅ Download processado! Verifique a pasta: {output_dir}"
+
+    def _download_with_pytubefix(
+        self,
+        url: str,
+        format: str,
+        output_filename: str,
+        output_dir: str,
+        cookies_file: str = None,
+        progress_callback=None
+    ) -> str:
+        """
+        Executa o download usando pytubefix (fallback).
+        
+        Args:
+            url: URL do vídeo
+            format: 'video' ou 'audio'
+            output_filename: Nome do arquivo (opcional)
+            output_dir: Diretório de saída
+            cookies_file: Caminho para arquivo de cookies (opcional)
+            progress_callback: Função para reportar progresso
+        """
+        try:
+            from pytubefix import YouTube
+        except ImportError:
+            raise Exception("pytubefix não instalado. Execute 'pip install pytubefix'.")
+        
+        logger.info("Iniciando fallback com pytubefix", url=url)
+        
+        def on_progress(stream, chunk, bytes_remaining):
+            total_size = stream.filesize
+            bytes_downloaded = total_size - bytes_remaining
+            percentage = (bytes_downloaded / total_size) * 100
+            if progress_callback and int(percentage) % 10 == 0:
+                progress_callback(f"Baixando (pytubefix): {int(percentage)}%")
+
+        try:
+            # Configurar YouTube object
+            # Nota: pytubefix suporta 'use_oauth' e 'allow_oauth_cache' para autenticação
+            # Mas vamos tentar sem OAuth primeiro para não bloquear esperando input
+            yt = YouTube(
+                url, 
+                on_progress_callback=on_progress,
+                use_oauth=False,
+                allow_oauth_cache=True
+            )
+            
+            video_title = yt.title
+            clean_title = self._sanitize_filename(video_title)
+            final_filename = output_filename if output_filename else clean_title
+            
+            if format == "audio":
+                if progress_callback:
+                    progress_callback("Baixando áudio com pytubefix...")
+                
+                # Pegar apenas áudio
+                stream = yt.streams.get_audio_only()
+                if not stream:
+                    raise Exception("Stream de áudio não encontrado")
+                
+                # Baixar
+                download_path = stream.download(output_path=output_dir, filename=f"{final_filename}_temp.m4a")
+                
+                # Converter para MP3 usando ffmpeg manualmente se necessário
+                # É mais garantido converter manualmente pois pytubefix baixa m4a/webm
+                final_path = os.path.join(output_dir, f"{final_filename}.mp3")
+                
+                # Usar FFmpeg para converter
+                self._convert_to_mp3(download_path, final_path)
+                
+                # Remover original
+                if os.path.exists(download_path) and os.path.exists(final_path):
+                    os.remove(download_path)
+                    
+            else:
+                if progress_callback:
+                    progress_callback("Baixando vídeo com pytubefix...")
+                
+                # Pegar melhor vídeo progressivo (video+audio) se disponível até 720p
+                # Streams progressivos são mais seguros no pytube
+                stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+                
+                # Se não achar progressivo bom, pega o melhor adaptativo e teria que juntar áudio...
+                # Para simplificar o fallback, vamos focar no progressivo que funciona direto
+                if not stream:
+                    stream = yt.streams.filter(file_extension='mp4').order_by('resolution').desc().first()
+                
+                if not stream:
+                    raise Exception("Nenhum stream de vídeo compatível encontrado")
+                    
+                final_path = stream.download(output_path=output_dir, filename=f"{final_filename}.mp4")
+
+            file_size = os.path.getsize(final_path)
+            size_mb = file_size / (1024 * 1024)
+            
+            return (
+                f"✅ Download concluído (via pytubefix)!\n"
+                f"📁 Arquivo: {final_path}\n"
+                f"📊 Tamanho: {size_mb:.2f} MB"
+            )
+            
+        except Exception as e:
+            logger.error("Erro no pytubefix", error=str(e))
+            raise e
+
+
+    def _download_with_pytube(
+        self,
+        url: str,
+        format: str,
+        output_filename: str,
+        output_dir: str,
+        progress_callback=None
+    ) -> str:
+        """
+        Executa o download usando pytube (fallback secundário).
+        
+        Args:
+            url: URL do vídeo
+            format: 'video' ou 'audio'
+            output_filename: Nome do arquivo (opcional)
+            output_dir: Diretório de saída
+            progress_callback: Função para reportar progresso
+        """
+        try:
+            from pytube import YouTube
+        except ImportError:
+            raise Exception("pytube não instalado. Execute 'pip install pytube'.")
+        
+        logger.info("Iniciando fallback secundário com pytube", url=url)
+        
+        def on_progress(stream, chunk, bytes_remaining):
+            total_size = stream.filesize
+            bytes_downloaded = total_size - bytes_remaining
+            percentage = (bytes_downloaded / total_size) * 100
+            if progress_callback and int(percentage) % 10 == 0:
+                progress_callback(f"Baixando (pytube): {int(percentage)}%")
+
+        try:
+            yt = YouTube(url, on_progress_callback=on_progress)
+            
+            video_title = yt.title
+            clean_title = self._sanitize_filename(video_title)
+            final_filename = output_filename if output_filename else clean_title
+            
+            if format == "audio":
+                if progress_callback:
+                    progress_callback("Baixando áudio com pytube...")
+                
+                stream = yt.streams.get_audio_only()
+                if not stream:
+                    raise Exception("Stream de áudio não encontrado")
+                
+                download_path = stream.download(output_path=output_dir, filename=f"{final_filename}_temp.m4a")
+                final_path = os.path.join(output_dir, f"{final_filename}.mp3")
+                
+                self._convert_to_mp3(download_path, final_path)
+                
+                if os.path.exists(download_path) and os.path.exists(final_path):
+                    os.remove(download_path)
+                    
+            else:
+                if progress_callback:
+                    progress_callback("Baixando vídeo com pytube...")
+                
+                stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+                
+                if not stream:
+                    stream = yt.streams.filter(file_extension='mp4').order_by('resolution').desc().first()
+                
+                if not stream:
+                    raise Exception("Nenhum stream de vídeo compatível encontrado")
+                    
+                final_path = stream.download(output_path=output_dir, filename=f"{final_filename}.mp4")
+
+            file_size = os.path.getsize(final_path)
+            size_mb = file_size / (1024 * 1024)
+            
+            return (
+                f"✅ Download concluído (via pytube)!\n"
+                f"📁 Arquivo: {final_path}\n"
+                f"📊 Tamanho: {size_mb:.2f} MB"
+            )
+            
+        except Exception as e:
+            logger.error("Erro no pytube", error=str(e))
+            raise e
+
+
+    def _convert_to_mp3(self, input_path: str, output_path: str):
+        """Converte áudio para MP3 usando ffmpeg via subprocess"""
+        import subprocess
+        try:
+            cmd = [
+                'ffmpeg', '-y', # Overwrite
+                '-i', input_path,
+                '-vn', # No video
+                '-acodec', 'libmp3lame',
+                '-q:a', '2', # Boa qualidade (VBR ~190kbps)
+                output_path
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"Erro na conversão FFmpeg: {e.stderr.decode('utf-8')}")
+        except FileNotFoundError:
+             raise Exception("FFmpeg não encontrado no sistema para conversão de áudio.")
+
