@@ -138,6 +138,20 @@ Para vídeos com restrição de idade ou que exigem login, use o parâmetro cook
             return self._error(
                 "yt-dlp não está instalado. Execute 'pip install yt-dlp'."
             )
+            
+        # Adicionar Deno ao PATH para resolver desafios do YouTube (necessário para yt-dlp recente)
+        # O agente pode ter instalado o deno em /root/.deno/bin
+        deno_paths = [
+            os.path.expanduser("~/.deno/bin"),
+            "/root/.deno/bin"
+        ]
+        
+        for path in deno_paths:
+            if os.path.exists(path):
+                if path not in os.environ["PATH"]:
+                    os.environ["PATH"] = f"{path}:{os.environ['PATH']}"
+                    logger.info("Adicionado binário do Deno ao PATH", path=path)
+                break
         
         # 4. Garantir diretório de saída
         output_dir = settings.outputs_dir
