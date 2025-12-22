@@ -15,12 +15,10 @@ import sys
 
 # Tentar importar yt_dlp, se não existir, o erro será tratado na execução se necessário,
 # mas idealmente deve estar instalado.
-try:
-    from yt_dlp import YoutubeDL
-    from yt_dlp.utils import DownloadError
-except ImportError:
-    YoutubeDL = None
-    DownloadError = None
+# Imports movidos para dentro dos métodos para permitir instalação em tempo de execução
+# Se a biblioteca não estiver instalada, o erro será tratado no método execute
+YoutubeDL = None
+DownloadError = None
 
 from .base import BaseTool, ToolParameter
 from config import get_settings, get_logger
@@ -87,9 +85,12 @@ Se o download falhar com erro 403 (Forbidden), você pode fornecer o conteúdo d
         Executa o download do conteúdo (vídeo ou áudio) usando yt-dlp.
         """
         
-        # 0. Verificar dependência yt-dlp
-        if YoutubeDL is None:
-            return self._error("Biblioteca 'yt-dlp' não está instalada. Execute 'pip install yt-dlp' no sistema.")
+        # 0. Verificar dependência yt-dlp (importação tardia)
+        try:
+            from yt_dlp import YoutubeDL
+            from yt_dlp.utils import DownloadError
+        except ImportError:
+             return self._error("Biblioteca 'yt-dlp' não está instalada. Execute 'pip install yt-dlp' no sistema.")
 
         # 1. Validar e preparar parâmetros básicos
         if not url:
@@ -188,6 +189,11 @@ Se o download falhar com erro 403 (Forbidden), você pode fornecer o conteúdo d
 
         logger.info(f"Iniciando download VÍDEO yt-dlp: {filename_base}")
 
+        try:
+            from yt_dlp import YoutubeDL
+        except ImportError:
+            raise ImportError("yt-dlp não instalado")
+
         ydl_opts = {
             'outtmpl': os.path.join(output_dir, filename_base) + '.%(ext)s',
             'recode-video': 'mp4', # Força container mp4
@@ -230,6 +236,11 @@ Se o download falhar com erro 403 (Forbidden), você pode fornecer o conteúdo d
             return caminho_completo_saida
 
         logger.info(f"Iniciando download ÁUDIO yt-dlp: {filename_base}")
+
+        try:
+            from yt_dlp import YoutubeDL
+        except ImportError:
+            raise ImportError("yt-dlp não instalado")
 
         ydl_opts = {
             'outtmpl': os.path.join(output_dir, filename_base) + '.%(ext)s',

@@ -108,9 +108,8 @@ async def upload_files(
                 errors.append(f"{file.filename}: Arquivo muito grande (máx: 50MB)")
                 continue
             
-            # Gerar nome único
-            file_id = uuid.uuid4().hex[:8]
-            safe_name = f"{file_id}_{file.filename}"
+            # Gerar nome (usar nome original)
+            safe_name = file.filename
             file_path = os.path.join(settings.uploads_dir, safe_name)
             
             # Garantir diretório existe
@@ -121,7 +120,7 @@ async def upload_files(
                 await f.write(content)
             
             uploaded.append(UploadedFile(
-                id=file_id,
+                id=safe_name,
                 filename=safe_name,
                 original_name=file.filename,
                 size=len(content),
@@ -159,12 +158,15 @@ async def list_files(
         if os.path.isfile(filepath):
             ext = os.path.splitext(filename)[1].lower()
             size = os.path.getsize(filepath)
-            file_id = filename.split('_')[0] if '_' in filename else filename[:8]
+            
+            # Agora o ID é o próprio nome do arquivo
+            file_id = filename
+            original_name = filename
             
             files.append(UploadedFile(
                 id=file_id,
                 filename=filename,
-                original_name=filename.split('_', 1)[1] if '_' in filename else filename,
+                original_name=original_name,
                 size=size,
                 extension=ext,
                 path=filepath
@@ -184,16 +186,29 @@ async def delete_file(
     if not os.path.exists(settings.uploads_dir):
         raise HTTPException(status_code=404, detail="Arquivo não encontrado")
     
-    # Procurar arquivo pelo ID
-    for filename in os.listdir(settings.uploads_dir):
-        if filename.startswith(file_id + "_"):
-            filepath = os.path.join(settings.uploads_dir, filename)
-            try:
-                os.remove(filepath)
-                logger.info("Arquivo removido", filename=filename)
-                return {"message": "Arquivo removido com sucesso"}
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Erro ao remover: {str(e)}")
+    # O file_id agora é o nome exato do arquivo
+    filepath = os.path.join(settings.uploads_dir, file_id)
+    
+    if os.path.exists(filepath) and os.path.isfile(filepath):
+        try:
+            os.remove(filepath)
+            logger.info("Arquivo removido", filename=file_id)
+            return {"message": "Arquivo removido com sucesso"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao remover: {str(e)}")
+            
+    # Fallback para compatibilidade com arquivos antigos (que tinham prefixo)
+    # Se não achou pelo nome exato, tenta procurar por prefixo se o file_id parecer um hex de 8 chars
+    if len(file_id) == 8: 
+        for filename in os.listdir(settings.uploads_dir):
+            if filename.startswith(file_id + "_"):
+                filepath = os.path.join(settings.uploads_dir, filename)
+                try:
+                    os.remove(filepath)
+                    logger.info("Arquivo antigo removido", filename=filename)
+                    return {"message": "Arquivo removido com sucesso"}
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=f"Erro ao remover: {str(e)}")
     
     raise HTTPException(status_code=404, detail="Arquivo não encontrado")
 
@@ -207,28 +222,46 @@ def find_file_by_id(file_id: str) -> Optional[dict]:
     Busca um arquivo pelo seu ID no diretório de uploads.
     
     Args:
-        file_id: ID do arquivo (8 caracteres hexadecimais)
+        file_id: ID do arquivo (agora é o próprio nome do arquivo)
         
     Returns:
         Dicionário com info do arquivo ou None se não encontrado
     """
     if not os.path.exists(settings.uploads_dir):
         return None
+        
+    # Tentativa 1: Busca exata (novo padrão)
+    filepath = os.path.join(settings.uploads_dir, file_id)
+    if os.path.isfile(filepath):
+         filename = file_id
+         ext = os.path.splitext(filename)[1].lower()
+         return {
+            "id": file_id,
+            "filename": filename,
+            "original_name": filename,
+            "extension": ext,
+            "path": filepath,
+            "size": os.path.getsize(filepath)
+        }
+
+    # Tentativa 2: Busca por prefixo (compatibilidade legada)
+    # Se o ID tem 8 caracteres, pode ser um prefixo antigo
+    if len(file_id) == 8:
+        for filename in os.listdir(settings.uploads_dir):
+            if filename.startswith(file_id + "_"):
+                filepath = os.path.join(settings.uploads_dir, filename)
+                if os.path.isfile(filepath):
+                    ext = os.path.splitext(filename)[1].lower()
+                    original_name = filename.split('_', 1)[1] if '_' in filename else filename
+                    return {
+                        "id": file_id,
+                        "filename": filename,
+                        "original_name": original_name,
+                        "extension": ext,
+                        "path": filepath,
+                        "size": os.path.getsize(filepath)
+                    }
     
-    for filename in os.listdir(settings.uploads_dir):
-        if filename.startswith(file_id + "_"):
-            filepath = os.path.join(settings.uploads_dir, filename)
-            if os.path.isfile(filepath):
-                ext = os.path.splitext(filename)[1].lower()
-                original_name = filename.split('_', 1)[1] if '_' in filename else filename
-                return {
-                    "id": file_id,
-                    "filename": filename,
-                    "original_name": original_name,
-                    "extension": ext,
-                    "path": filepath,
-                    "size": os.path.getsize(filepath)
-                }
     return None
 
 

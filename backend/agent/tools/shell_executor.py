@@ -10,7 +10,9 @@ import asyncio
 import shlex
 
 from .base import BaseTool, ToolParameter
+from .base import BaseTool, ToolParameter
 from config import get_settings, get_logger
+from agent.container_session_manager import ContainerSessionManager
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -87,6 +89,12 @@ Para tarefas longas (downloads, instalações), aumente o timeout."""
             type="integer",
             description="Tempo máximo em segundos (padrão: 30, máx: 3600). Defina um valor alto para tarefas demoradas.",
             required=False
+        ),
+        ToolParameter(
+            name="session_id",
+            type="string",
+            description="ID da sessão para isolamento (injetado automaticamente pelo orquestrador)",
+            required=False
         )
     ]
     
@@ -95,15 +103,17 @@ Para tarefas longas (downloads, instalações), aumente o timeout."""
         command: str,
         working_dir: str = "/app/data",
         timeout: int = 30,
+        session_id: str = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Executa comando shell.
+        Executa comando shell (em container isolado se session_id for fornecido).
         
         Args:
             command: Comando a executar
             working_dir: Diretório de trabalho
             timeout: Timeout em segundos
+            session_id: ID da sessão para uso de container isolado
             
         Returns:
             Resultado da execução
@@ -150,10 +160,35 @@ Para tarefas longas (downloads, instalações), aumente o timeout."""
         logger.info(
             "Executando shell",
             command=command[:100],
-            working_dir=working_dir
+            working_dir=working_dir,
+            session_id=session_id
         )
         
         try:
+            # SE TEM SESSION_ID, EXECUTAR NO CONTAINER
+            if session_id:
+                try:
+                    exit_code, stdout, stderr = await ContainerSessionManager.execute_command(
+                        session_id=session_id,
+                        command=command,
+                        timeout=timeout
+                    )
+                    
+                    output = stdout
+                    if stderr:
+                        output += f"\nAvisos/Erros:\n{stderr}"
+                    
+                    if exit_code != 0:
+                        return self._error(f"Código de saída: {exit_code}\n{output}")
+                    
+                    return self._success(output or "(sem saída)")
+
+                except Exception as e:
+                    logger.error("Erro na execução em container", error=str(e))
+                    return self._error(f"Erro na execução isolada: {str(e)}")
+
+
+            # ABAIXO É A EXECUÇÃO LOCAL (LEGADO/FALLBACK ou SEM SESSÃO)
             # Detectar se é um comando em background
             # IMPORTANTE: Apenas consideramos background se o usuário colocar & no final.
             # Se usar 'nohup' mas sem '&', assumimos que o usuário quer rodar síncrono 

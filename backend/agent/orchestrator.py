@@ -14,6 +14,7 @@ from config import get_settings, get_logger
 from agent.openrouter_client import get_openrouter_client
 from agent.prompts import SYSTEM_PROMPT, RAG_CONTEXT_TEMPLATE
 from agent.tools import get_all_tools, execute_tool
+from agent.container_session_manager import ContainerSessionManager
 
 # -------------------------------------------------
 # Configuração
@@ -302,6 +303,7 @@ class AgentOrchestrator:
                     "Processamento cancelado pelo usuário",
                     iteration=iteration
                 )
+                await self.cleanup_resources(conversation.id)
                 return {
                     "content": "Processamento cancelado pelo usuário.",
                     "role": "assistant",
@@ -380,6 +382,7 @@ class AgentOrchestrator:
                         error_msg = f"Erro: Todos os modelos falharam (1ª: {primary_model}, 2ª: {secondary_model}, 3ª: {tertiary_model})"
                         logger.error("Falha em todas as instâncias")
                         await self._send_log_feedback(websocket, "Erro: Falha em todas as instâncias", progress_callback, "error")
+                        await self.cleanup_resources(conversation.id)
                         return {
                             "content": error_msg,
                             "role": "assistant"
@@ -398,6 +401,7 @@ class AgentOrchestrator:
                     content_length=len(response.get("content", ""))
                 )
                 await self._send_log_feedback(websocket, "Resposta final gerada", progress_callback)
+                await self.cleanup_resources(conversation.id)
                 return response
             
             # Executar cada tool call
@@ -440,8 +444,14 @@ class AgentOrchestrator:
                     
                     tool_args["websocket"] = websocket
                     
+                    tool_args["websocket"] = websocket
+                    
                     # Passar cancel_state para tools que precisam verificar cancelamento
                     tool_args["cancel_state"] = cancel_state
+
+                    # INJETAR SESSION_ID para isolamento
+                    if conversation.id:
+                        tool_args["session_id"] = conversation.id
 
                     # Heartbeat task para feedback constante
                     async def heartbeat(ws):
@@ -541,13 +551,26 @@ class AgentOrchestrator:
             except Exception as e:
                 logger.warning("Erro ao salvar procedimentos no RAG", error=str(e))
         
+            except Exception as e:
+                logger.warning("Erro ao salvar procedimentos no RAG", error=str(e))
+        
         # Se chegou aqui, excedeu iterações
         logger.warning(
             "Máximo de iterações excedido",
             iterations=max_iterations
         )
         
+        await self.cleanup_resources(conversation.id)
         return {
             "content": "Desculpe, a operação excedeu o limite de iterações. Por favor, tente novamente com uma tarefa mais simples.",
             "role": "assistant"
         }
+    
+    async def cleanup_resources(self, session_id: str):
+        """Limpa recursos da sessão"""
+        if session_id:
+            logger.info("Limpando recursos da sessão", session_id=session_id)
+            try:
+                ContainerSessionManager.cleanup_container(session_id)
+            except Exception as e:
+                logger.error("Erro ao limpar container", error=str(e))
