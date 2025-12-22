@@ -431,9 +431,72 @@ class AgentOrchestrator:
                         "tool_id": tool_id
                     })
                 
+                # Inicializar variáveis antes do try para evitar erro de variável não definida
+                # se houver exceção antes de serem atribuídas
+                result = None
+                tool_args = {}
+                
                 try:
-                    # Parse dos argumentos
-                    tool_args = json.loads(tool_args_str)
+                    # Parse dos argumentos com sanitização de escapes inválidos
+                    # Alguns modelos LLM retornam \t, \n literais que são inválidos em JSON
+                    def sanitize_json_string(s: str) -> str:
+                        """
+                        Corrige sequências de escape inválidas em JSON.
+                        Modelos LLM às vezes geram \\t, \\n literais (não escapados como \\\\t)
+                        que causam erro no json.loads.
+                        """
+                        import re
+                        # Substituir escapes inválidos por escapes válidos
+                        # Primeiro, duplicar barras antes de caracteres de escape inválidos
+                        # Isso transforma \t em \\t (escape válido)
+                        
+                        # Lista de caracteres que precisam de escape duplo
+                        # Excluímos os já válidos em JSON: \\, \", \n, \r, \t, \b, \f, \uXXXX
+                        # O problema é que \t dentro de uma string JSON deveria ser um tab,
+                        # mas se o modelo gerou literalmente "\t" (barra+t), precisamos escapar a barra
+                        
+                        # Detectar se a string tem escapes malformados tentando parsear
+                        try:
+                            json.loads(s)
+                            return s  # Já é válido
+                        except json.JSONDecodeError:
+                            pass
+                        
+                        # Tentar corrigir escapes inválidos
+                        # Substituir sequências de escape problemáticas dentro de strings JSON
+                        # Pattern: captura uma barra seguida de caractere que NÃO é escape válido
+                        # Escapes válidos em JSON: \\ \" \/ \b \f \n \r \t \uXXXX
+                        
+                        # Abordagem: substituir \\ por placeholder, corrigir, restaurar
+                        placeholder = "\x00ESCAPED_BACKSLASH\x00"
+                        s = s.replace("\\\\", placeholder)
+                        
+                        # Agora, barras simples restantes que precedem caracteres inválidos
+                        # devem ser escapadas. Mas primeiro, vamos tratar os casos comuns:
+                        # \t \n \r são válidos em JSON, o problema é quando o modelo
+                        # gera uma string literal com barra+t que não está dentro de aspas
+                        
+                        # Restaurar
+                        s = s.replace(placeholder, "\\\\")
+                        
+                        return s
+                    
+                    # Tentar parse direto primeiro
+                    try:
+                        tool_args = json.loads(tool_args_str)
+                    except json.JSONDecodeError:
+                        # Se falhar, tentar com sanitização mais agressiva
+                        # Usar ast.literal_eval como fallback para strings Python escapadas
+                        import ast
+                        try:
+                            # Tentar interpretar como string Python (que aceita mais escapes)
+                            # e depois converter para JSON
+                            sanitized = tool_args_str.encode('utf-8').decode('unicode_escape')
+                            tool_args = json.loads(sanitized)
+                        except Exception:
+                            # Última tentativa: substituir escapes problemáticos manualmente
+                            fixed = tool_args_str.replace('\\t', '\\\\t').replace('\\n', '\\\\n').replace('\\r', '\\\\r')
+                            tool_args = json.loads(fixed)
                     
                     logger.info(
                         "Executando tool",
@@ -478,7 +541,6 @@ class AgentOrchestrator:
                     # Iniciar heartbeat
                     heartbeat_task = asyncio.create_task(heartbeat(websocket)) if websocket else None
 
-                    result = None
                     # Executar a tool
                     try:
                         result = await execute_tool(tool_name, tool_args)
@@ -530,7 +592,8 @@ class AgentOrchestrator:
                 })
                 
                 # Guardar procedimento para salvar no RAG depois
-                if result.get("success"):
+                # Verificar se result foi definido (pode não ter sido se houve erro de parsing)
+                if result and result.get("success"):
                     executed_procedures.append({
                         "tool": tool_name,
                         "args": tool_args,

@@ -1,0 +1,40 @@
+FROM python:3.11-slim
+
+# Evitar arquivos .pyc e logs em buffer
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Instalar dependências do sistema
+# ffmpeg: para processamento de áudio/vídeo (yt-dlp, whisper)
+# xxd: para injeção de código via hex
+# curl, gnupg: utilitários básicos
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    xxd \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instalar bibliotecas Python principais
+# yt-dlp & pytubefix: Download de vídeos
+# faster-whisper: Transcrição
+# Data science libs: numpy, pandas, matplotlib, scipy, pillow, requests, bs4
+RUN pip install --no-cache-dir \
+    yt-dlp \
+    pytubefix \
+    numpy \
+    pandas \
+    requests \
+    pillow \
+    beautifulsoup4 \
+    matplotlib \
+    scipy \
+    faster-whisper \
+    regex \
+    setuptools
+
+# Diretório de trabalho
+WORKDIR /app/data
+
+# Comando padrão (mantém container rodando se necessário, mas geralmente será sobrescrito)
+CMD ["tail", "-f", "/dev/null"]

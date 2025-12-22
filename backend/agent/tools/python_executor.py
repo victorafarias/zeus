@@ -10,10 +10,12 @@ import docker
 import tempfile
 import os
 import uuid
+import asyncio
 
 from .base import BaseTool, ToolParameter
 from .docker_helper import get_docker_client
 from config import get_settings, get_logger
+from agent.container_session_manager import ContainerSessionManager
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -44,6 +46,12 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
             type="integer",
             description="Tempo máximo de execução em segundos (padrão: 60)",
             required=False
+        ),
+        ToolParameter(
+            name="session_id",
+            type="string",
+            description="ID da sessão atual (injetado automaticamente)",
+            required=False
         )
     ]
     
@@ -52,19 +60,28 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
         """Obtém cliente Docker sob demanda"""
         return get_docker_client()
     
-    async def execute(self, code: str, timeout: int = 60, **kwargs) -> Dict[str, Any]:
+    async def execute(self, code: str, timeout: int = 60, session_id: str = None, **kwargs) -> Dict[str, Any]:
         """
-        Executa código Python em container isolado.
+        Executa código Python em container isolado (persistente por sessão).
         
         Args:
             code: Código Python a executar
             timeout: Timeout em segundos
+            session_id: ID da sessão
             kwargs: Argumentos extras (websocket)
             
         Returns:
             Resultado da execução
         """
         websocket = kwargs.get('websocket')
+        
+        if not session_id:
+             session_id = kwargs.get('session_id')
+        
+        if not session_id:
+             # Fallback para execução sem sessão (cria container novo se não houver ID?)
+             # Melhor exigir ID ou gerar um temporário
+             session_id = "temp-" + uuid.uuid4().hex[:8]
         
         if not self.docker_client:
             return self._error("Docker não disponível")
@@ -75,42 +92,38 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
         logger.info(
             "Executando Python",
             code_length=len(code),
-            timeout=timeout
+            timeout=timeout,
+            session_id=session_id
         )
         
         try:
-            # Nome único para o container
-            container_name = f"zeus-python-{uuid.uuid4().hex[:8]}"
+            # Obter container da sessão (inicia se parado, cria se não existe)
+            container = ContainerSessionManager.get_or_create_container(session_id)
+            if not container:
+                return self._error("Falha ao obter container de execução")
+
+            # Nome único para o script
+            script_name = f"script_{uuid.uuid4().hex[:8]}.py"
             
-            # Tentar usar imagem sandbox otimizada, fallback para python:3.11-slim
-            image = "python:3.11-slim"
+            # Preparar o script no container
+            # Usando xxd como no ContainerSessionManager
+            encoded_code = code.encode('utf-8').hex()
+            setup_cmd = f"/bin/bash -c 'if ! command -v xxd &> /dev/null; then apt-get update && apt-get install -y xxd; fi; echo {encoded_code} | xxd -r -p > /app/data/{script_name}'"
             
-            # 1. Iniciar container
-            container = self.docker_client.containers.run(
-                image=image,
-                command="tail -f /dev/null", 
-                name=container_name,
-                working_dir="/code",
-                mem_limit=f"{settings.max_memory_mb}m",
-                network_disabled=False,
-                detach=True,
-                remove=True
-            )
-            
+            exit_code, out = container.exec_run(setup_cmd)
+            if exit_code != 0:
+                return self._error(f"Erro ao preparar ambiente: {out.decode('utf-8')}")
+
             try:
-                # 2. Injetar código
-                encoded_code = code.encode('utf-8').hex()
-                setup_cmd = f"/bin/bash -c 'if ! command -v xxd &> /dev/null; then apt-get update && apt-get install -y xxd; fi; echo {encoded_code} | xxd -r -p > /code/script.py'"
-                container.exec_run(setup_cmd)
-                
-                # REFATORANDO para rodar stream em thread para não bloquear loop e permitir websocket send
-                
-                return await self._run_with_streaming(container, websocket)
+                # Executar com streaming
+                # O script está em /app/data/{script_name}
+                # O workdir do container de sessão é /app/data                
+                return await self._run_with_streaming(container, script_name, websocket, timeout)
                     
             finally:
-                # Parar container (auto-remove fará a limpeza)
+                # Limpar script
                 try:
-                    container.stop()
+                    container.exec_run(f"rm /app/data/{script_name}")
                 except:
                     pass
         
@@ -118,24 +131,24 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
             logger.error("Erro ao executar Python", error=str(e))
             return self._error(f"Erro interno: {str(e)}")
 
-    async def _run_with_streaming(self, container, websocket):
+    async def _run_with_streaming(self, container, script_name, websocket, timeout):
         """Executa script e faz streaming do output em background"""
-        import asyncio
         import threading
         
         output_buffer = []
         
+        # Generator original do docker-py
         def stream_generator():
-            # Executa comando unbuffered
-            return container.exec_run("python -u /code/script.py", stream=True, demux=True)
+            # Executa python unbuffered
+            # Usamos exec_run com stream=True
+            return container.exec_run(f"python3 /app/data/{script_name}", stream=True, demux=True)
 
-        # Rodar generator em thread para não bloquear o async loop
-        # Iterar sobre o generator é bloqueante IO
-        
+        # Queue para comunicação thread -> async
         q = asyncio.Queue()
         
         def producer():
             try:
+                # Executa
                 gen = stream_generator()
                 for stdout, stderr in gen:
                     chunk = ""
@@ -145,10 +158,9 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
                         chunk = stderr.decode('utf-8', errors='replace')
                         is_err = True
                     if chunk:
-                        # Colocar na queue thread-safe
                         asyncio.run_coroutine_threadsafe(q.put((chunk, is_err)), loop)
             except Exception as e:
-                asyncio.run_coroutine_threadsafe(q.put(None), loop) # Sinal de fim
+                pass # Erro no stream
             finally:
                 asyncio.run_coroutine_threadsafe(q.put(None), loop)
 
@@ -156,25 +168,40 @@ Bibliotecas disponíveis: numpy, pandas, requests, pillow, beautifulsoup4, matpl
         t = threading.Thread(target=producer, daemon=True)
         t.start()
         
-        # Consumir fila
-        while True:
-            item = await q.get()
-            if item is None:
-                break
-            
-            chunk, is_err = item
-            output_buffer.append(chunk)
-            
-            if websocket:
+        # Consumir fila com timeout
+        try:
+            start_time = asyncio.get_event_loop().time()
+            while True:
+                # Verificar timeout
+                if (asyncio.get_event_loop().time() - start_time) > timeout:
+                    output_buffer.append("\n[Tempo limite de execução excedido]")
+                    break
+                
                 try:
-                    await websocket.send_json({
-                        "type": "tool_log",
-                        "tool": "execute_python",
-                        "output": chunk,
-                        "is_error": is_err
-                    })
-                except:
-                    pass
+                    # Wait for item com timeout curto para checar loop timeout
+                    item = await asyncio.wait_for(q.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                
+                if item is None:
+                    break
+                
+                chunk, is_err = item
+                output_buffer.append(chunk)
+                
+                if websocket:
+                    try:
+                        await websocket.send_json({
+                            "type": "tool_log",
+                            "tool": "execute_python",
+                            "output": chunk,
+                            "is_error": is_err
+                        })
+                    except:
+                        pass
+        except Exception as e:
+            output_buffer.append(f"\n[Erro na leitura de saída: {str(e)}]")
         
         full_output = "".join(output_buffer)
         return self._success(full_output)
+

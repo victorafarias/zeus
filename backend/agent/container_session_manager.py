@@ -20,7 +20,8 @@ class ContainerSessionManager:
     Cria containers sob demanda e os remove quando solicitados.
     """
     
-    IMAGE_NAME = "python:3.11" # Imagem base
+    IMAGE_NAME = "zeus-sandbox:latest" # Imagem customizada com dependências
+
     @classmethod
     def get_container_name(cls, session_id: str) -> str:
         from datetime import datetime
@@ -52,10 +53,48 @@ class ContainerSessionManager:
             try:
                 # Montar volume de dados para persistência durante a sessão
                 # Montamos o diretório de dados do host para o container ter acesso aos arquivos
-                # IMPORTANTE: Isso dá acesso aos arquivos do usuário, mas isola a execução do processo system host
                 volumes = {
                     settings.data_dir: {'bind': '/app/data', 'mode': 'rw'}
                 }
+                
+                # Verificar se a imagem existe, se não, construir
+                try:
+                    client.images.get(cls.IMAGE_NAME)
+                except docker.errors.ImageNotFound:
+                    logger.info(f"Imagem {cls.IMAGE_NAME} não encontrada. Iniciando build...")
+                    try:
+                        # Build usando SDK
+                        # Contexto é a raiz do projeto (onde o app roda, backend ou root?)
+                        # Assumindo que Dockerfile.sandbox está em ./docker/Dockerfile.sandbox relativo ao working dir
+                        import os
+                        dockerfile_path = os.path.join("docker", "Dockerfile.sandbox")
+                        
+                        # Se não achar o arquivo, tenta ajustar path (se rodando de dentro de backend/)
+                        if not os.path.exists(dockerfile_path) and os.path.exists(os.path.join("..", "docker", "Dockerfile.sandbox")):
+                             dockerfile_path = os.path.join("..", "docker", "Dockerfile.sandbox")
+                             build_context = ".."
+                        else:
+                             build_context = "."
+                             
+                        logger.info(f"Construindo imagem a partir de {dockerfile_path} context context {build_context}")
+                        
+                        image, build_logs = client.images.build(
+                            path=build_context,
+                            dockerfile=dockerfile_path,
+                            tag=cls.IMAGE_NAME,
+                            rm=True
+                        )
+                        for chunk in build_logs:
+                            if 'stream' in chunk:
+                                logger.debug(chunk['stream'].strip())
+                                
+                        logger.info(f"Imagem {cls.IMAGE_NAME} construída com sucesso!")
+                        
+                    except Exception as build_err:
+                        logger.error(f"Erro ao buildar imagem: {build_err}")
+                        logger.warning("Tentando usar python:3.11-slim como fallback...")
+                        # Fallback se build falhar
+                        cls.IMAGE_NAME = "python:3.11-slim"
                 
                 container = client.containers.run(
                     image=cls.IMAGE_NAME,
@@ -65,7 +104,9 @@ class ContainerSessionManager:
                     volumes=volumes,
                     working_dir="/app/data",
                     restart_policy={"Name": "no"}, # Não reiniciar automaticamente
-                    network_mode="bridge" # Rede padrão
+                    network_mode="bridge",
+                    # Importante: aumentar shm_size para multiprocessamento (whisper/pl)
+                    shm_size="512m" 
                 )
                 logger.info("Container criado com sucesso", id=container.short_id)
                 return container
@@ -106,14 +147,9 @@ class ContainerSessionManager:
         container = cls.get_or_create_container(session_id)
         if not container:
             raise Exception("Não foi possível obter container para execução")
-
-        # Usar exec_run do docker SDK
-        # Nota: exec_run não suporta timeout nativo facilmente de forma async sem bloquear, 
-        # mas vamos envolver em asyncio.to_thread
         
         try:
-            # exec_run retorna (exit_code, output) onde output é bytes combinados ou tupla se demux=True
-            # Para separar stdout/stderr, usamos demux=True
+            import shlex
             
             def _run():
                 return container.exec_run(
@@ -121,8 +157,6 @@ class ContainerSessionManager:
                     demux=True,
                     workdir="/app/data"
                 )
-            
-            import shlex
             
             # Executar em thread para não bloquear loop
             exec_result = await asyncio.to_thread(_run)
@@ -138,3 +172,60 @@ class ContainerSessionManager:
         except Exception as e:
             logger.error("Erro na execução do comando docker", error=str(e))
             raise e
+
+    @classmethod
+    async def execute_python_in_container(cls, session_id: str, code: str, timeout: int = 60) -> tuple[bool, str]:
+        """
+        Executa código Python dentro do container persistente da sessão.
+        
+        Args:
+            session_id: ID da sessão
+            code: Código Python a executar
+            timeout: Tempo limite
+            
+        Returns:
+            (success, output)
+        """
+        container = cls.get_or_create_container(session_id)
+        if not container:
+            return False, "Docker não disponível ou erro ao criar container"
+
+        try:
+            # Criar arquivo script temporário dentro do container via echo/bash
+            # Usando xxd para evitar problemas com aspas e escapes complexos
+            encoded_code = code.encode('utf-8').hex()
+            
+            # Comando para decodificar e salvar script.py
+            # Nota: usamos um nome aleatório para evitar colisão se rodar paralelo (embora session seja serial geralmente)
+            import uuid
+            script_name = f"script_{uuid.uuid4().hex[:8]}.py"
+            setup_cmd = f"/bin/bash -c 'echo {encoded_code} | xxd -r -p > /attr/data/{script_name}'"
+            
+            # ATENÇÃO: working_dir é /app/data, e volume montado também.
+            # Vamos salvar direto lá.
+            setup_cmd = f"/bin/bash -c 'if ! command -v xxd &> /dev/null; then apt-get update && apt-get install -y xxd; fi; echo {encoded_code} | xxd -r -p > {script_name}'"
+            
+            # Executar setup (criação do arquivo)
+            exit_code, out, err = await cls.execute_command(session_id, setup_cmd, timeout=10)
+            if exit_code != 0:
+                return False, f"Erro ao preparar script: {err}"
+            
+            # Executar python
+            run_cmd = f"python3 {script_name}"
+            exit_code, stdout, stderr = await cls.execute_command(session_id, run_cmd, timeout=timeout)
+            
+            # Limpar script
+            await cls.execute_command(session_id, f"rm {script_name}")
+            
+            output = stdout
+            if stderr:
+                output += f"\n[STDERR]\n{stderr}"
+            
+            if exit_code != 0:
+                return False, f"Erro na execução (Exit Code {exit_code}):\n{output}"
+                
+            return True, output
+
+        except Exception as e:
+            return False, f"Erro interno ao executar Python: {str(e)}"
+

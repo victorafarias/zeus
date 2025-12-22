@@ -2,27 +2,27 @@
 =====================================================
 ZEUS - Media Processor Tool
 Transcrição de áudio e vídeo usando Faster Whisper
+Execução isolada em container Docker
 =====================================================
 """
 
 from typing import Dict, Any, List, Optional
 import os
 import pathlib
-from faster_whisper import WhisperModel
-try:
-    import torch
-except ImportError:
-    torch = None
+import asyncio
+import uuid
+import re
 
 from .base import BaseTool, ToolParameter
 from config import get_settings, get_logger
+from agent.container_session_manager import ContainerSessionManager
 
 logger = get_logger(__name__)
 settings = get_settings()
 
 
 class TranscribeMediaTool(BaseTool):
-    """Transcreve áudio ou vídeo para texto usando Faster Whisper"""
+    """Transcreve áudio ou vídeo para texto usando Faster Whisper no container isolado"""
     
     name = "transcribe_media"
     description = """Transcreve áudio ou vídeo para texto usando Whisper (modelo local).
@@ -47,6 +47,12 @@ O sistema detecta automaticamente se há GPU disponível para aceleração."""
             type="string",
             description="Tamanho do modelo: 'base', 'small', 'medium', 'large-v2'. Padrão: 'medium'.",
             required=False
+        ),
+        ToolParameter(
+            name="session_id",
+            type="string",
+            description="ID da sessão atual (injetado automaticamente)",
+            required=False
         )
     ]
     
@@ -55,195 +61,226 @@ O sistema detecta automaticamente se há GPU disponível para aceleração."""
         file_path: str,
         language: str = "pt",
         model_size: str = "medium",
+        session_id: str = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """Transcreve arquivo de mídia ou pasta de arquivos"""
+        """Transcreve arquivo de mídia ou pasta de arquivos no container"""
         websocket = kwargs.get('websocket')
         loop = asyncio.get_running_loop()
 
-        def report_progress(msg: str):
-            """Envia progresso via WebSocket (thread-safe)"""
-            if websocket:
-                asyncio.run_coroutine_threadsafe(
-                    websocket.send_json({
-                        "type": "status",
-                        "status": "processing",
-                        "content": msg
-                    }),
-                    loop
-                )
+        if not session_id:
+             session_id = kwargs.get('session_id')
+        if not session_id:
+             return self._error("ID de sessão não fornecido.")
+
+        # 1. Resolver caminho (Assume paths mapeados /app/data)
+        # Se o comando vem do usuário como "uploads/file.mp3", precisamos garantir path absoluto ou relativo correto
+        # Para container, preferimos absoluto "/app/data/..."
         
-        # 1. Resolver caminho
-        target_path = pathlib.Path(file_path)
-        if not target_path.is_absolute():
-            # Tenta encontrar em diretórios padrão se for relativo
-            possible_roots = [settings.uploads_dir, settings.outputs_dir, settings.data_dir]
-            found = False
-            for root in possible_roots:
-                candidate = pathlib.Path(root) / file_path
-                if candidate.exists():
-                    target_path = candidate
-                    found = True
-                    break
+        target_path_str = file_path
+        if not file_path.startswith("/"):
+            # Assume relativo a /app/data se não começar com /
+            # Mas uploads geralmente é /app/data/uploads
+            # Se user digitar "uploads/X", vira /app/data/uploads/X
+             target_path_str = f"/app/data/{file_path}" if not file_path.startswith("app/data") else f"/{file_path}"
+        
+        # 2. Gerar Script Python
+        script_code = self._generate_script(
+            target_path=target_path_str,
+            language=language or "pt",
+            model_size=model_size or "medium"
+        )
+        
+        # 3. Executar no Container com Streaming
+        logger.info(f"Iniciando transcrição ({model_size}) no container...")
+        
+        container = ContainerSessionManager.get_or_create_container(session_id)
+        if not container:
+            return self._error("Falha ao obter container de sessão.")
             
-            if not found:
-                 return self._error(f"Arquivo ou diretório não encontrado: {file_path}")
-        else:
-             if not target_path.exists():
-                return self._error(f"Arquivo ou diretório não encontrado: {file_path}")
+        return await self._run_script_in_container(container, script_code, websocket, loop)
 
-        # 2. Identificar arquivos para processar
-        files_to_process = []
-        supported_extensions = {
-            '.mp3', '.wav', '.flac', '.aac', '.m4a', '.ogg', '.wma', # Áudio
-            '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm'  # Vídeo
-        }
-
-        if target_path.is_file():
-            if target_path.suffix.lower() in supported_extensions:
-                files_to_process.append(target_path)
-            else:
-                return self._error(f"Formato não suportado: {target_path.suffix}. Suportados: {', '.join(supported_extensions)}")
-        elif target_path.is_dir():
-            report_progress(f"Buscando arquivos de mídia em: {target_path.name}...")
-            for item in target_path.iterdir():
-                if item.is_file() and item.suffix.lower() in supported_extensions:
-                    files_to_process.append(item)
-            
-            if not files_to_process:
-                return self._error(f"Nenhum arquivo de mídia encontrado em: {target_path}")
+    async def _run_script_in_container(self, container, script_code, websocket, loop):
+        """Executa script e faz streaming do output"""
+        import threading
         
-        # 3. Detectar GPU (Lógica solicitada pelo usuário)
-        try:
-            has_gpu = False
-            if torch and torch.cuda.is_available():
-                has_gpu = True
-                device_info = f"CUDA (GPU: {torch.cuda.get_device_name(0)})"
-            else:
-                device_info = "CPU"
-        except Exception:
-            has_gpu = False
-            device_info = "CPU (erro detecção)"
-
-        device = "cuda" if has_gpu else "cpu"
-        compute_type = "float16" if has_gpu else "int8" # int8 é mais rápido/compatível pra CPU
-
-        logger.info(f"Ambiente de execução: {device_info} | Device: {device} | Compute: {compute_type}")
-        report_progress(f"Iniciando processamento de {len(files_to_process)} arquivo(s) usando {device_info}...")
-
-        # 4. Executar processamento em batch na thread
-        try:
-            result_summary = await asyncio.to_thread(
-                self._process_batch,
-                files_to_process,
-                language,
-                model_size,
-                device,
-                compute_type,
-                report_progress
-            )
-            return self._success(result_summary)
-            
-        except Exception as e:
-            logger.error("Erro na transcrição", error=str(e))
-            return self._error(f"Erro fatal no processo de transcrição: {str(e)}")
-
-    def _process_batch(
-        self, 
-        files: List[pathlib.Path], 
-        language: str, 
-        model_size: str,
-        device: str, 
-        compute_type: str,
-        progress_callback
-    ) -> str:
-        """Carrega o modelo UMA VEZ e processa todos os arquivos"""
+        # Preparar script
+        encoded_code = script_code.encode('utf-8').hex()
+        script_name = f"transcribe_{uuid.uuid4().hex[:8]}.py"
+        setup_cmd = f"/bin/bash -c 'if ! command -v xxd &> /dev/null; then apt-get update && apt-get install -y xxd; fi; echo {encoded_code} | xxd -r -p > /app/data/{script_name}'"
         
-        # Carregar Modelo
-        try:
-            if progress_callback: progress_callback(f"Carregando modelo Whisper '{model_size}' em {device}...")
-            model = WhisperModel(model_size, device=device, compute_type=compute_type)
-            if progress_callback: progress_callback("Modelo carregado com sucesso.")
-        except Exception as e:
-            # Fallback para CPU se falhar no CUDA (ex: driver incompatível mesmo com GPU presente)
-            if device == "cuda":
-                if progress_callback: progress_callback(f"Erro ao carregar em CUDA ({str(e)}). Tentando CPU...")
-                logger.warning(f"Fallback para CPU devido a erro: {e}")
-                model = WhisperModel(model_size, device="cpu", compute_type="int8")
-            else:
-                raise e
+        exit_code, out = container.exec_run(setup_cmd)
+        if exit_code != 0:
+            return self._error(f"Erro ao preparar script: {out.decode('utf-8')}")
 
-        # Diretório de saída padrão (mesmo do arquivo ou /outputs se read-only?)
-        # O script original salva no mesmo diretório da entrada. Vamos tentar manter isso,
-        # mas se falhar (permissão), fallback para settings.outputs_dir.
+        output_buffer = []
         
-        results = []
-        
-        for i, file_path in enumerate(files):
-            current_progress = f"[{i+1}/{len(files)}] {file_path.name}"
-            if progress_callback: progress_callback(f"Transcrevendo: {current_progress}")
-            logger.info(f"Transcrevendo arquivo: {file_path}")
+        def stream_generator():
+            return container.exec_run(f"python3 /app/data/{script_name}", stream=True, demux=True)
 
+        q = asyncio.Queue()
+        
+        def producer():
             try:
-                # Tenta salvar no mesmo diretório
-                output_dir = file_path.parent
-                if not os.access(output_dir, os.W_OK):
-                    output_dir = pathlib.Path(settings.outputs_dir)
-                
-                self._transcribe_single_file(model, file_path, output_dir, language)
-                results.append(f"✅ {file_path.name}")
-                
-            except Exception as e:
-                logger.error(f"Erro ao transcrever {file_path.name}: {e}")
-                results.append(f"❌ {file_path.name} (Erro: {str(e)})")
+                gen = stream_generator()
+                for stdout, stderr in gen:
+                    chunk = ""
+                    if stdout: chunk = stdout.decode('utf-8', errors='replace')
+                    if stderr: chunk += stderr.decode('utf-8', errors='replace') # Merge stderr to log
+                    if chunk:
+                        asyncio.run_coroutine_threadsafe(q.put(chunk), loop)
+            except Exception:
+                pass
+            finally:
+                asyncio.run_coroutine_threadsafe(q.put(None), loop)
 
-        return f"Processamento concluído.\n\nResultado:\n" + "\n".join(results)
-
-    def _transcribe_single_file(self, model: WhisperModel, file_path: pathlib.Path, output_dir: pathlib.Path, language: str):
-        """Lógica de transcrição e divisão idêntica ao script do usuário"""
+        t = threading.Thread(target=producer, daemon=True)
+        t.start()
         
-        # Transcrever
+        # Consumir
+        while True:
+            item = await q.get()
+            if item is None:
+                break
+            
+            # Enviar para websocket se parecer progresso
+            output_buffer.append(item)
+            
+            if websocket:
+                # Filtrar mensagens de progresso para UX
+                # [PROGRESS] txt
+                if "[INFO]" in item or "Transcrevendo" in item or "%" in item:
+                     try:
+                        await websocket.send_json({
+                            "type": "status",
+                            "status": "processing",
+                            "content": item.strip()
+                        })
+                     except: pass
+        
+        # Limpar
+        container.exec_run(f"rm /app/data/{script_name}")
+        
+        full_output = "".join(output_buffer)
+        if "Processamento concluído" in full_output:
+            # Extrair resumo se possível
+            return self._success(full_output)
+        else:
+             return self._error(f"Erro ou execução incompleta:\n{full_output}")
+
+    def _generate_script(self, target_path: str, language: str, model_size: str) -> str:
+        safe_path = target_path.replace('"', '\\"')
+        
+        return f"""
+import os
+import sys
+import re
+import pathlib
+from faster_whisper import WhisperModel
+import torch
+
+target_path = pathlib.Path("{safe_path}")
+language = "{language}"
+model_size = "{model_size}"
+
+def log(msg):
+    print(f"[INFO] {{msg}}", flush=True)
+
+if not target_path.exists():
+    print(f"Erro: Arquivo não encontrado: {{target_path}}")
+    sys.exit(1)
+
+# Identificar arquivos
+files = []
+exts = {{'.mp3', '.wav', '.flac', '.aac', '.m4a', '.ogg', '.wma', '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm'}}
+
+if target_path.is_file():
+    if target_path.suffix.lower() in exts:
+        files.append(target_path)
+elif target_path.is_dir():
+    for item in target_path.iterdir():
+        if item.is_file() and item.suffix.lower() in exts:
+            files.append(item)
+
+if not files:
+    print("Nenhum arquivo encontrado.")
+    sys.exit(1)
+
+# Configurar Device
+device = "cpu"
+compute_type = "int8"
+if torch.cuda.is_available():
+    device = "cuda"
+    compute_type = "float16"
+    log(f"Usando GPU: {{torch.cuda.get_device_name(0)}}")
+else:
+    log("Usando CPU")
+
+# Carregar Modelo
+log(f"Carregando modelo {{model_size}}...")
+try:
+    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+except Exception as e:
+    log(f"Erro com GPU/float16, tentando fallback CPU/int8... ({{e}})")
+    model = WhisperModel(model_size, device="cpu", compute_type="int8")
+
+log("Modelo carregado.")
+
+results = []
+
+for i, file_path in enumerate(files):
+    log(f"Transcrevendo [{{i+1}}/{{len(files)}}]: {{file_path.name}}")
+    
+    try:
         segments, info = model.transcribe(str(file_path), beam_size=5, language=language)
         
-        full_transcription_text = ""
+        full_text = ""
         for segment in segments:
-            full_transcription_text += segment.text + " "
-
-        # Limpeza
-        full_transcription_text = re.sub(r'\s+', ' ', full_transcription_text).strip()
+            full_text += segment.text + " "
+            # Opcional: print progress
         
-        words = full_transcription_text.split()
-        num_words = len(words)
+        full_text = re.sub(r'\s+', ' ', full_text).strip()
         
-        if num_words == 0:
-            logger.warning(f"Arquivo vazio: {file_path.name}")
-            return
-
-        # Divisão em partes
-        MAX_WORDS_PER_PART = 7500
-        current_part_words = []
-        part_number = 1
-        
+        # Salvar
+        output_dir = file_path.parent
         base_name = file_path.stem
         
-        for word in words:
-            current_part_words.append(word)
-            
-            if len(current_part_words) >= MAX_WORDS_PER_PART:
-                output_filename = f"{base_name}-parte-{part_number}.txt"
-                output_filepath = output_dir / output_filename
-                
-                with open(output_filepath, 'w', encoding='utf-8') as f:
-                    f.write(" ".join(current_part_words))
-                
-                logger.info(f"Salvo: {output_filename}")
-                current_part_words = []
-                part_number += 1
+        # Dividir se grande
+        words = full_text.split()
+        MAX = 7500
+        part = 1
+        current = []
         
-        if current_part_words:
-            output_filename = f"{base_name}-parte-{part_number}.txt"
-            output_filepath = output_dir / output_filename
+        saved_files = []
+        
+        if not words:
+            log(f"Audio vazio: {{file_path.name}}")
+            continue
             
-            with open(output_filepath, 'w', encoding='utf-8') as f:
-                f.write(" ".join(current_part_words))
-            logger.info(f"Salvo: {output_filename}")
+        for w in words:
+            current.append(w)
+            if len(current) >= MAX:
+                fname = f"{{base_name}}-parte-{{part}}.txt"
+                with open(output_dir / fname, 'w', encoding='utf-8') as f:
+                    f.write(" ".join(current))
+                saved_files.append(fname)
+                current = []
+                part += 1
+        
+        if current:
+            fname = f"{{base_name}}-parte-{{part}}.txt" if part > 1 else f"{{base_name}}.txt"
+            with open(output_dir / fname, 'w', encoding='utf-8') as f:
+                f.write(" ".join(current))
+            saved_files.append(fname)
+            
+        log(f"Concluído: {{file_path.name}} -> {{', '.join(saved_files)}}")
+        results.append(f"✅ {{file_path.name}}")
+        
+    except Exception as e:
+        log(f"Erro em {{file_path.name}}: {{e}}")
+        results.append(f"❌ {{file_path.name}}")
+
+print("Processamento concluído.")
+print("Resumo:")
+print("\\n".join(results))
+"""

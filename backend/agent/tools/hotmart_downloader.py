@@ -13,15 +13,12 @@ import asyncio
 import uuid
 import sys
 
-# Tentar importar yt_dlp, se não existir, o erro será tratado na execução se necessário,
-# mas idealmente deve estar instalado.
-# Imports movidos para dentro dos métodos para permitir instalação em tempo de execução
-# Se a biblioteca não estiver instalada, o erro será tratado no método execute
-YoutubeDL = None
-DownloadError = None
+# Tentar importar yt_dlp apenas para verificação de tipos se necessário, mas não para execução
+# A execução real acontecerá dentro do container
 
 from .base import BaseTool, ToolParameter
 from config import get_settings, get_logger
+from agent.container_session_manager import ContainerSessionManager
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -30,7 +27,7 @@ settings = get_settings()
 class HotmartDownloaderTool(BaseTool):
     """
     Baixa vídeos (MP4) ou extrai áudios (MP3) de links do Hotmart usando yt-dlp.
-    Suporta autenticação via cookies (arquivo ou texto).
+    Executa dentro de um container isolado para garantir dependências.
     """
     
     name = "hotmart_downloader"
@@ -69,6 +66,12 @@ Se o download falhar com erro 403 (Forbidden), você pode fornecer o conteúdo d
             type="string",
             description="Conteúdo do arquivo de cookies em texto (formato Netscape). Se fornecido, será salvo como cookies.txt e usado.",
             required=False
+        ),
+        ToolParameter(
+            name="session_id",
+            type="string",
+            description="ID da sessão atual (injetado automaticamente)",
+            required=False
         )
     ]
     
@@ -79,18 +82,25 @@ Se o download falhar com erro 403 (Forbidden), você pode fornecer o conteúdo d
         format: str = "video",
         cookies_file: str = None,
         cookies_content: str = None,
+        session_id: str = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Executa o download do conteúdo (vídeo ou áudio) usando yt-dlp.
+        Executa o download do conteúdo (vídeo ou áudio) usando yt-dlp dentro do container.
         """
-        
-        # 0. Verificar dependência yt-dlp (importação tardia)
-        try:
-            from yt_dlp import YoutubeDL
-            from yt_dlp.utils import DownloadError
-        except ImportError:
-             return self._error("Biblioteca 'yt-dlp' não está instalada. Execute 'pip install yt-dlp' no sistema.")
+        if not session_id:
+            # Tentar fallback para obter session_id do kwargs se não vier direto
+            session_id = kwargs.get('session_id')
+            
+        if not session_id:
+             # Se ainda não tiver session_id (ex: execução direta sem contexto de sessão), 
+             # criar uma sessão temporária ou falhar.
+             # Para simplificar, vamos falhar solicitando o ID.
+             # Mas o orchestrator deve injetar "session_id" se configurado.
+             # Verificando se orchestrator injeta:
+             # orchestrator.py: tool_args["session_id"] = conversation.id
+             # Então sempre deve vir.
+             return self._error("ID de sessão não fornecido (erro interno).")
 
         # 1. Validar e preparar parâmetros básicos
         if not url:
@@ -118,8 +128,7 @@ Se o download falhar com erro 403 (Forbidden), você pode fornecer o conteúdo d
         # Se conteúdo de cookies for passado, salvar arquivo
         if cookies_content:
             try:
-                # Se não tem cabeçalho Netscape, adiciona (opcional, mas bom pra garantir validade se o user colar só os cookies)
-                # Mas geralmente o user cola o arquivo todo. Vamos salvar direto.
+                # Salvar arquivo no HOST (que é montado no container)
                 with open(default_cookies_path, "w", encoding="utf-8") as f:
                     f.write(cookies_content)
                 cookies_path = default_cookies_path
@@ -129,145 +138,119 @@ Se o download falhar com erro 403 (Forbidden), você pode fornecer o conteúdo d
         
         # Se path fornecido, usa ele. Se não, tenta usar o default se existir
         if cookies_file:
-            if os.path.exists(cookies_file):
-                cookies_path = cookies_file
-            else:
-                return self._error(f"Arquivo de cookies informado não existe: {cookies_file}")
+            cookies_path = cookies_file # Assume path válido dentro do container (/app/data/...)
         elif not cookies_path and os.path.exists(default_cookies_path):
-            # Se não foi passado file nem content, mas existe o default, usa o default
             cookies_path = default_cookies_path
-            logger.info(f"Usando cookies padrão encontrados em: {cookies_path}")
-
-        # 3. Definir diretório de saída
-        # O usuário usa /app/data/downloads no script, vamos usar o configurado no settings
-        output_dir = settings.outputs_dir  # Geralmente /app/data/outputs ou downloads
-        # Assegurar que existe
-        settings.ensure_dirs() # Garante criação
-        
-        # O script original usa hardcoded /app/data/downloads, vamos honrar o settings.outputs_dir
-        # mas se o usuário quiser explicitamente downloads, podemos ajustar. O padrão do Zeus é outputs_dir.
-        
-        # 4. Executar download
-        try:
-            full_path = ""
-            if format == "audio":
-                full_path = await asyncio.to_thread(
-                    self._download_audio_with_ytdlp,
-                    url=url,
-                    output_dir=output_dir,
-                    filename_base=output_filename, # Sem extensão (ou removida dentro da func)
-                    cookies_path=cookies_path
-                )
-            else:
-                full_path = await asyncio.to_thread(
-                    self._download_video_with_ytdlp,
-                    url=url,
-                    output_dir=output_dir,
-                    filename_base=output_filename,
-                    cookies_path=cookies_path
-                )
-                
-            return self._success(f"✅ Download concluído! Arquivo salvo em: {full_path}")
             
-        except Exception as e:
-            logger.error(f"Erro no download Hotmart ({format})", error=str(e))
-            return self._error(f"Falha ao baixar {format}: {str(e)}")
-
-    def _download_video_with_ytdlp(self, url: str, output_dir: str, filename_base: str, cookies_path: str = None) -> str:
-        """
-        Baixa vídeo usando yt-dlp (baseado no script do usuário).
-        """
-        # Garantir nome sem extensão para o outtmpl
-        filename_base = filename_base.replace(".mp4", "").replace(".mp3", "")
-        # Caminho completo esperado (para verificação "já existe")
-        expected_filename = f"{filename_base}.mp4"
-        caminho_completo_saida = os.path.join(output_dir, expected_filename)
+        # Garantir paths relativos ao container se necessário
+        # Assumindo que settings.data_dir é /app/data e mapeia corretamente
         
-        if os.path.exists(caminho_completo_saida):
-            logger.info(f"Arquivo já existe, pulando download: {caminho_completo_saida}")
-            return camino_completo_saida
-
-        logger.info(f"Iniciando download VÍDEO yt-dlp: {filename_base}")
-
-        try:
-            from yt_dlp import YoutubeDL
-        except ImportError:
-            raise ImportError("yt-dlp não instalado")
-
-        ydl_opts = {
-            'outtmpl': os.path.join(output_dir, filename_base) + '.%(ext)s',
-            'recode-video': 'mp4', # Força container mp4
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://cf-embed.play.hotmart.com/',
-            },
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            # Opções extras pra robustez
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-        }
+        # 3. Gerar Script Python para execução no Container
+        script_code = self._generate_download_script(
+            url=url,
+            output_filename=output_filename,
+            format=format,
+            cookies_path=cookies_path,
+            output_dir="/app/data/outputs" # Caminho interno fixo ou settings.outputs_dir
+        )
         
-        if cookies_path:
-            ydl_opts['cookiefile'] = cookies_path
-            
-        with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-            
-        # O yt-dlp pode ter gerado o arquivo, verificar
-        if os.path.exists(caminho_completo_saida):
-            return caminho_completo_saida
-            
-        # Se não achou com nome exato, tenta achar o que foi gerado (caso recode tenha falhado ou algo assim)
-        # Mas com 'recode-video': 'mp4' deve estar em mp4.
-        return caminho_completo_saida
-
-    def _download_audio_with_ytdlp(self, url: str, output_dir: str, filename_base: str, cookies_path: str = None) -> str:
-        """
-        Baixa áudio MP3 usando yt-dlp (baseado no script do usuário).
-        """
-        # Nome base limpo
-        filename_base = filename_base.replace(".mp3", "").replace(".mp4", "")
-        nome_final_mp3 = f"{filename_base}.mp3"
-        caminho_completo_saida = os.path.join(output_dir, nome_final_mp3)
+        # 4. Executar no Container
+        logger.info(f"Executando download ({format}) no container via hotmart_downloader...")
         
-        if os.path.exists(caminho_completo_saida):
-            logger.info(f"Arquivo de áudio já existe: {caminho_completo_saida}")
-            return caminho_completo_saida
+        success, output = await ContainerSessionManager.execute_python_in_container(
+            session_id=session_id,
+            code=script_code,
+            timeout=600 # 10 min timeout para download
+        )
+        
+        if success:
+            return self._success(output)
+        else:
+            return self._error(f"Erro no download: {output}")
 
-        logger.info(f"Iniciando download ÁUDIO yt-dlp: {filename_base}")
+    def _generate_download_script(self, url: str, output_filename: str, format: str, cookies_path: str, output_dir: str) -> str:
+        """Gera o código Python para rodar dentro do container"""
+        
+        # Escapar strings para python
+        safe_url = url.replace('"', '\\"')
+        safe_filename = output_filename.replace('"', '\\"')
+        safe_cookies = f'"{cookies_path}"' if cookies_path else "None"
+        
+        return f"""
+import os
+import sys
 
-        try:
-            from yt_dlp import YoutubeDL
-        except ImportError:
-            raise ImportError("yt-dlp não instalado")
+# Garantir output dir
+output_dir = "{output_dir}"
+os.makedirs(output_dir, exist_ok=True)
 
-        ydl_opts = {
-            'outtmpl': os.path.join(output_dir, filename_base) + '.%(ext)s',
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://cf-embed.play.hotmart.com/',
-            },
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-        }
+try:
+    from yt_dlp import YoutubeDL
+except ImportError:
+    print("Erro Crítico: yt-dlp não instalado no container.")
+    sys.exit(1)
 
-        if cookies_path:
-            ydl_opts['cookiefile'] = cookies_path
+url = "{safe_url}"
+filename_base = "{safe_filename}"
+format_type = "{format}"
+cookies_path = {safe_cookies}
 
-        with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+# Limpar extensão do base name
+filename_base = filename_base.replace(".mp4", "").replace(".mp3", "")
 
-        if os.path.exists(caminho_completo_saida):
-            return caminho_completo_saida
-            
-        return caminho_completo_saida
+print(f"Iniciando download '{{format_type}}' para: {{filename_base}}")
 
+ydl_opts = {{
+    'outtmpl': os.path.join(output_dir, filename_base) + '.%(ext)s',
+    'http_headers': {{
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://cf-embed.play.hotmart.com/',
+    }},
+    'quiet': True,
+    'no_warnings': True,
+    'nocheckcertificate': True,
+}}
 
+if cookies_path and os.path.exists(cookies_path):
+    ydl_opts['cookiefile'] = cookies_path
+elif cookies_path:
+    print(f"Aviso: Arquivo de cookies não encontrado: {{cookies_path}}")
+
+if format_type == 'audio':
+    ydl_opts.update({{
+        'format': 'bestaudio/best',
+        'postprocessors': [{{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }}],
+    }})
+else:
+    ydl_opts.update({{
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'recode-video': 'mp4',
+    }})
+
+try:
+    with YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+    
+    # Verificar resultado
+    expected_ext = 'mp3' if format_type == 'audio' else 'mp4'
+    expected_file = os.path.join(output_dir, f"{{filename_base}}.{{expected_ext}}")
+    
+    if os.path.exists(expected_file):
+        print(f"✅ Download concluído com sucesso: {{expected_file}}")
+    else:
+        # Tentar encontrar qualquer arquivo que comece com o base
+        files = [f for f in os.listdir(output_dir) if f.startswith(filename_base)]
+        if files:
+            print(f"✅ Download concluído (arquivo salvo): {{files[0]}}")
+        else:
+            print("❌ Erro: Arquivo final não encontrado após execução.")
+            sys.exit(1)
+
+except Exception as e:
+    print(f"❌ Erro yt-dlp: {{str(e)}}")
+    sys.exit(1)
+"""
