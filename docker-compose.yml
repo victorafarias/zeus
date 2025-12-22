@@ -26,6 +26,10 @@ services:
       - MAX_MEMORY_MB=${MAX_MEMORY_MB:-512}
       # Evitar deadlocks com bibliotecas de ML ao fazer fork
       - TOKENIZERS_PARALLELISM=false
+      # Caminho do diretório de dados NO HOST (para montar em containers sandbox)
+      - HOST_DATA_DIR=${HOST_DATA_DIR:-./data}
+      # Diretório raiz do projeto no host (para resolver caminhos relativos)
+      - COMPOSE_PROJECT_DIR=${COMPOSE_PROJECT_DIR:-/root/zeus}
 
     # Volumes montados
     volumes:

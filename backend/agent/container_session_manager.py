@@ -51,10 +51,25 @@ class ContainerSessionManager:
             # Criar novo
             logger.info("Criando novo container para sessão", session_id=session_id)
             try:
+                # IMPORTANTE: Usar HOST_DATA_DIR (caminho real no host da VPS)
+                # e não settings.data_dir (que é /app/data, interno ao container principal)
+                # Isso garante que arquivos baixados no sandbox persistam no host
+                import os
+                host_data_dir = os.environ.get('HOST_DATA_DIR', settings.data_dir)
+                
+                # Se for caminho relativo (./data), converter para absoluto baseado no diretório do compose
+                # Na VPS, isso seria algo como /root/zeus/data
+                if host_data_dir.startswith('./') or host_data_dir.startswith('.\\'):
+                    # Assumimos que o compose roda em /root/zeus ou similar
+                    # Precisamos do caminho absoluto do host
+                    compose_dir = os.environ.get('COMPOSE_PROJECT_DIR', '/root/zeus')
+                    host_data_dir = os.path.join(compose_dir, host_data_dir[2:])
+                    
+                logger.info("Montando volume de dados", host_path=host_data_dir, container_path='/app/data')
+                
                 # Montar volume de dados para persistência durante a sessão
-                # Montamos o diretório de dados do host para o container ter acesso aos arquivos
                 volumes = {
-                    settings.data_dir: {'bind': '/app/data', 'mode': 'rw'}
+                    host_data_dir: {'bind': '/app/data', 'mode': 'rw'}
                 }
                 
                 # Verificar se a imagem existe, se não, construir
