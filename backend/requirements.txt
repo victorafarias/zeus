@@ -37,3 +37,6 @@ faster-whisper>=0.10.0
 
 # Text-to-Speech
 TTS>=0.22.0
+
+# YouTube Downloader (Custom Parser / JS Reverse)
+pytubefix>=2.0.0
