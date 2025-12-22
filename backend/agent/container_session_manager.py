@@ -21,11 +21,11 @@ class ContainerSessionManager:
     """
     
     IMAGE_NAME = "python:3.11" # Imagem base
-    CONTAINER_PREFIX = "zeus-session-"
-    
     @classmethod
     def get_container_name(cls, session_id: str) -> str:
-        return f"{cls.CONTAINER_PREFIX}{session_id}"
+        from datetime import datetime
+        date_str = datetime.now().strftime("%d-%m-%Y")
+        return f"{date_str}-{session_id}"
 
     @classmethod
     def get_or_create_container(cls, session_id: str) -> Optional[docker.models.containers.Container]:

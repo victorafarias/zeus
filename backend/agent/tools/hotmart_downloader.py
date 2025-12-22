@@ -198,7 +198,7 @@ Se o download falhar com erro 403 (Forbidden), você pode fornecer o conteúdo d
             'outtmpl': os.path.join(output_dir, filename_base) + '.%(ext)s',
             'recode-video': 'mp4', # Força container mp4
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Referer': 'https://cf-embed.play.hotmart.com/',
             },
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
@@ -245,7 +245,7 @@ Se o download falhar com erro 403 (Forbidden), você pode fornecer o conteúdo d
         ydl_opts = {
             'outtmpl': os.path.join(output_dir, filename_base) + '.%(ext)s',
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Referer': 'https://cf-embed.play.hotmart.com/',
             },
             'format': 'bestaudio/best',
