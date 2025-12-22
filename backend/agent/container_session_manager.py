@@ -20,7 +20,7 @@ class ContainerSessionManager:
     Cria containers sob demanda e os remove quando solicitados.
     """
     
-    IMAGE_NAME = "zeus-sandbox:latest" # Imagem customizada com dependências
+    IMAGE_NAME = "zeus-sandbox:v1" # Imagem customizada com dependências
 
     @classmethod
     def get_container_name(cls, session_id: str) -> str:

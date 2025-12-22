@@ -50,6 +50,9 @@
     /* Fontes */
     --font-main: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+    /* Layout */
+    --chat-max-width: 800px;
 }
 
 
@@ -618,6 +621,9 @@ ol {
     flex-direction: column;
     min-width: 0;
     background: var(--color-bg-primary);
+    position: relative;
+    height: 100%;
+    overflow: hidden;
 }
 
 /* Header do Chat */
@@ -630,6 +636,9 @@ ol {
     background: var(--color-bg-secondary);
     border-bottom: 1px solid var(--glass-border);
     flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 
 .btn-toggle-sidebar {
@@ -824,7 +833,8 @@ ol {
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
-    max-width: 800px;
+    width: 100%;
+    max-width: var(--chat-max-width);
     margin: 0 auto;
 }
 
@@ -1012,7 +1022,8 @@ ol {
     display: flex;
     align-items: flex-end;
     gap: 0.75rem;
-    max-width: 800px;
+    width: 100%;
+    max-width: var(--chat-max-width);
     margin: 0 auto;
     background: var(--color-bg-secondary);
     border: 1px solid var(--glass-border);
