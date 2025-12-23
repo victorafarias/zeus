@@ -803,6 +803,10 @@ ol {
     flex-direction: column;
 }
 
+.custom-select-dropdown[hidden] {
+    display: none !important;
+}
+
 /* Campo de Filtro Dentro do Dropdown */
 .dropdown-filter {
     width: 100%;
@@ -998,11 +1002,16 @@ ol {
     .mobile-only {
         display: block !important;
     }
+
+    /* Mostrar botão de modelos no mobile */
+    .btn-select-models {
+        display: flex;
+    }
 }
 
-/* Botão Selecionar Modelos (centralizado) */
+/* Botão Selecionar Modelos (centralizado, mobile only) */
 .btn-select-models {
-    display: flex;
+    display: none;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
@@ -1024,7 +1033,8 @@ ol {
 
 /* Modal de Seleção de Modelos */
 .models-modal {
-    width: 90%;
+    width: 600px;
+    max-width: 90%;
     max-height: 85vh;
     overflow-y: auto;
 }
@@ -1515,6 +1525,10 @@ ol {
     justify-content: center;
     z-index: 1000;
     backdrop-filter: blur(4px);
+}
+
+.modal-overlay[hidden] {
+    display: none !important;
 }
 
 .modal {
