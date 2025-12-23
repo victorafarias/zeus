@@ -150,7 +150,9 @@ Para vídeos restritos (idade/login), use 'cookies_text' (formato Netscape)."""
         Inclui lógica de verificação e atualização automática de bibliotecas.
         """
         safe_url = url.replace('"', '\\"')
-        safe_filename = output_filename.replace('"', '\\"') if output_filename else "None"
+        # CORREÇÃO: Quando output_filename tem valor, precisa de aspas ao redor
+        # para ser tratado como string literal no script Python gerado
+        safe_filename = f'"{output_filename.replace(chr(34), chr(92)+chr(34))}"' if output_filename else "None"
         safe_cookies = f'"{cookies_path}"' if cookies_path else "None"
         
         return f'''
