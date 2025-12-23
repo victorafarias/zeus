@@ -40,7 +40,7 @@ Use esta ferramenta quando precisar de:
 - Notícias recentes ou atualizações
 - Informações que mudam frequentemente (preços, cotações, etc)
 - Dados sobre eventos recentes
-- Verificar informações atualizadas
+- Verificar informações atualizadas (por ex,: últimas versões de softwares, bilbiotecas, aplicativos etc.)
 - Pesquisar qualquer assunto que exija dados atuais
 
 A ferramenta retorna informações com citação das fontes."""
@@ -62,7 +62,8 @@ A ferramenta retorna informações com citação das fontes."""
     ]
     
     # Modelo usado para busca na web (com sufixo :online para ativar web search)
-    SEARCH_MODEL = "openai/gpt-4o-mini:online"
+    # SEARCH_MODEL = "openai/gpt-4o-mini:online"
+    SEARCH_MODEL = "deepseek/deepseek-chat-v3-0324:online"
     
     async def execute(
         self,
@@ -91,6 +92,8 @@ A ferramenta retorna informações com citação das fontes."""
             # Construir o prompt do sistema
             # Instruímos o modelo a buscar informações atuais e citar fontes
             system_prompt = """Você é um assistente de pesquisa especializado em buscar informações atuais na internet.
+
+Importante: se na mensagem do usuário não houver um fuso horário especificado, use o fuso padrão UTC-3 de Brasília/DF no Brasil.
 
 Suas responsabilidades:
 1. Buscar informações recentes e relevantes sobre a consulta
