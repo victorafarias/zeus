@@ -180,7 +180,7 @@ try:
     from faster_whisper import WhisperModel
     import torch
 except ImportError as e:
-    print(f"Erro ao importar dependências: {e}")
+    print(f"Erro ao importar dependências: {{e}}")
     print("Verifique se faster-whisper e torch estão instalados no container.")
     sys.exit(1)
 
