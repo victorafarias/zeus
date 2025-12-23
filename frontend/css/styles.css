@@ -1016,6 +1016,7 @@ ol {
     background: var(--color-bg-primary);
     position: relative;
     transition: all var(--transition-fast);
+    flex-shrink: 0;
 }
 
 .message-form {

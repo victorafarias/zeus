@@ -680,7 +680,8 @@ function disableInput() {
 function enableInput() {
     if (messageInput) {
         messageInput.disabled = false;
-        messageInput.focus();
+        // Usar preventScroll para evitar que o navegador role a página no mobile
+        messageInput.focus({ preventScroll: true });
     }
     if (btnSend) btnSend.disabled = false;
 }
