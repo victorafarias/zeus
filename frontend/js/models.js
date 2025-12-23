@@ -3,12 +3,11 @@
  * ZEUS - Gerenciador de Modelos
  * Carrega e gerencia seleção de modelos OpenRouter
  * Suporta 3 instâncias: primário, secundário e Mago
+ * Usa dropdowns customizados com filtro integrado
  * =====================================================
  */
 
 // Cache de modelos carregados do servidor
-// modelsWithTools: apenas modelos com suporte a function calling (para 1ª e 2ª Instância)
-// allModels: todos os modelos disponíveis (para Mago)
 let modelsWithToolsCache = [];
 let allModelsCache = [];
 
@@ -20,26 +19,15 @@ let selectedModels = {
     mago: 'openai/gpt-4.1-nano'        // Mago (modelo poderoso)
 };
 
-// Referências aos elementos select
-let modelSelects = {
-    primary: null,
-    secondary: null,
-    mago: null
-};
-
-// Referências aos campos de filtro
-let modelFilters = {
-    primary: null,
-    secondary: null,
-    mago: null
-};
-
 // Mapeamento de instância para chave
 const INSTANCE_MAP = {
     1: 'primary',
     2: 'secondary',
     3: 'mago'
 };
+
+// Armazena listas de modelos globalmente para os filtros
+let globalModelLists = { withTools: [], all: [] };
 
 
 /**
@@ -79,7 +67,6 @@ async function loadModels(toolsOnly = true) {
 async function loadAllModelLists() {
     console.log('[Models] Carregando listas de modelos...');
 
-    // Carregar em paralelo para melhor performance
     const [withTools, all] = await Promise.all([
         loadModels(true),   // Apenas com tools (para 1ª e 2ª Instância)
         loadModels(false)   // Todos os modelos (para Mago)
@@ -87,21 +74,17 @@ async function loadAllModelLists() {
 
     modelsWithToolsCache = withTools;
     allModelsCache = all;
+    globalModelLists = { withTools, all };
 
     console.log('[Models] Modelos com tools:', modelsWithToolsCache.length);
     console.log('[Models] Todos os modelos (Mago):', allModelsCache.length);
 
-    return {
-        withTools: modelsWithToolsCache,
-        all: allModelsCache
-    };
+    return globalModelLists;
 }
 
 
 /**
  * Formata nome do provedor para exibição amigável
- * @param {string} provider - Nome do provedor (ex: openai, anthropic)
- * @returns {string} Nome formatado para exibição
  */
 function formatProviderName(provider) {
     const names = {
@@ -119,39 +102,31 @@ function formatProviderName(provider) {
 
 /**
  * Formata nome do modelo para exibição
- * Inclui tamanho do contexto em K se disponível
- * @param {object} model - Objeto do modelo
- * @returns {string} Nome formatado com contexto
  */
 function formatModelName(model) {
     let name = model.name || model.id.split('/')[1];
-
-    // Adicionar indicador de contexto (ex: 128k)
     if (model.context_length) {
         const ctx = Math.round(model.context_length / 1000);
         name += ` (${ctx}k)`;
     }
-
     return name;
 }
 
 
 /**
- * Renderiza opções em um único seletor de modelo
- * @param {HTMLSelectElement} selectElement - Elemento select a popular
+ * Renderiza opções no dropdown customizado
+ * @param {HTMLElement} optionsContainer - Container das opções (.dropdown-options)
  * @param {Array} models - Lista de modelos
- * @param {string} selectedValue - Valor previamente selecionado
- * @param {string} filterText - Texto para filtrar modelos (opcional)
+ * @param {string} selectedValue - Valor selecionado atualmente
+ * @param {string} filterText - Texto de filtro
+ * @param {Function} onSelect - Callback quando uma opção é selecionada
  */
-function renderModelOptions(selectElement, models, selectedValue, filterText = '') {
-    if (!selectElement) {
-        return;
-    }
+function renderDropdownOptions(optionsContainer, models, selectedValue, filterText = '', onSelect) {
+    if (!optionsContainer) return;
 
-    // Limpar opções existentes
-    selectElement.innerHTML = '';
+    optionsContainer.innerHTML = '';
 
-    // Filtrar modelos se houver texto de filtro
+    // Filtrar modelos
     let filteredModels = models;
     if (filterText.trim()) {
         const searchLower = filterText.toLowerCase();
@@ -159,28 +134,14 @@ function renderModelOptions(selectElement, models, selectedValue, filterText = '
             const modelName = (model.name || model.id).toLowerCase();
             return modelName.includes(searchLower);
         });
-
-        // Garantir que o modelo selecionado esteja na lista, mesmo se não der match no filtro
-        // Isso evita que o select mude valor "sozinho" visualmente
-        if (selectedValue) {
-            const isSelectedInList = filteredModels.some(m => m.id === selectedValue);
-            if (!isSelectedInList) {
-                // Buscar modelo completo na lista original
-                const selectedModelObj = models.find(m => m.id === selectedValue);
-                if (selectedModelObj) {
-                    // Adicionar no início para destaque
-                    filteredModels = [selectedModelObj, ...filteredModels];
-                }
-            }
-        }
     }
 
     if (filteredModels.length === 0) {
-        selectElement.innerHTML = '<option value="">Nenhum modelo encontrado</option>';
+        optionsContainer.innerHTML = '<div class="dropdown-no-results">Nenhum modelo encontrado</div>';
         return;
     }
 
-    // Agrupar modelos por provedor para melhor organização
+    // Agrupar por provedor
     const providers = {};
     filteredModels.forEach(model => {
         const [provider] = model.id.split('/');
@@ -190,149 +151,171 @@ function renderModelOptions(selectElement, models, selectedValue, filterText = '
         providers[provider].push(model);
     });
 
-    // Renderizar grupos de modelos (optgroup)
+    // Renderizar grupos
     Object.entries(providers).forEach(([provider, providerModels]) => {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = formatProviderName(provider);
+        // Header do grupo
+        const groupHeader = document.createElement('div');
+        groupHeader.className = 'dropdown-option-group';
+        groupHeader.textContent = formatProviderName(provider);
+        optionsContainer.appendChild(groupHeader);
 
+        // Opções do grupo
         providerModels.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model.id;
-            option.textContent = formatModelName(model);
-
-            // Marcar como selecionado se for o valor salvo
+            const option = document.createElement('div');
+            option.className = 'dropdown-option';
             if (model.id === selectedValue) {
-                option.selected = true;
+                option.classList.add('selected');
             }
+            option.textContent = formatModelName(model);
+            option.dataset.value = model.id;
 
-            optgroup.appendChild(option);
+            option.addEventListener('click', () => {
+                onSelect(model.id, formatModelName(model));
+            });
+
+            optionsContainer.appendChild(option);
         });
-
-        selectElement.appendChild(optgroup);
     });
 }
 
 
 /**
- * Renderiza todos os três seletores de modelo com os modelos carregados
- * 1ª e 2ª Instância: apenas modelos com suporte a tools (function calling)
- * Mago: todos os modelos disponíveis
- * @param {Object} modelLists - Objeto com {withTools: Array, all: Array}
+ * Inicializa um dropdown customizado
+ * @param {number} instance - Número da instância (1, 2, 3)
+ * @param {string} prefix - Prefixo dos IDs ('', 'modal-')
+ * @param {Array} models - Lista de modelos para este dropdown
  */
-function renderAllModelSelectors(modelLists) {
-    console.log('[Models] Renderizando seletores...');
-    console.log('[Models] 1ª Instância:', selectedModels.primary);
-    console.log('[Models] 2ª Instância:', selectedModels.secondary);
-    console.log('[Models] Mago:', selectedModels.mago);
+function initCustomDropdown(instance, prefix, models) {
+    const key = INSTANCE_MAP[instance];
+    const triggerId = `${prefix}trigger-${instance}`;
+    const dropdownId = `${prefix}dropdown-${instance}`;
+    const filterId = `${prefix}model-filter-${instance}`;
+    const optionsId = `${prefix}options-${instance}`;
 
-    // Capturar referências aos elementos select
-    modelSelects.primary = document.getElementById('model-select-1');
-    modelSelects.secondary = document.getElementById('model-select-2');
-    modelSelects.mago = document.getElementById('model-select-3');
+    const trigger = document.getElementById(triggerId);
+    const dropdown = document.getElementById(dropdownId);
+    const filter = document.getElementById(filterId);
+    const optionsContainer = document.getElementById(optionsId);
+    const wrapper = trigger?.closest('.custom-select-wrapper');
 
-    // Capturar referências aos campos de filtro
-    modelFilters.primary = document.getElementById('model-filter-1');
-    modelFilters.secondary = document.getElementById('model-filter-2');
-    modelFilters.mago = document.getElementById('model-filter-3');
-
-    // 1ª e 2ª Instância: apenas modelos com suporte a tools
-    // (necessário para o agente funcionar corretamente com tool calling)
-    renderModelOptions(modelSelects.primary, modelLists.withTools, selectedModels.primary);
-    renderModelOptions(modelSelects.secondary, modelLists.withTools, selectedModels.secondary);
-
-    // Mago: todos os modelos (modelo mais poderoso, usado em situações especiais)
-    renderModelOptions(modelSelects.mago, modelLists.all, selectedModels.mago);
-
-    // Adicionar event listeners para mudanças de seleção
-    if (modelSelects.primary) {
-        modelSelects.primary.addEventListener('change', (e) => handleModelChange(1, e.target.value));
-    }
-    if (modelSelects.secondary) {
-        modelSelects.secondary.addEventListener('change', (e) => handleModelChange(2, e.target.value));
-    }
-    if (modelSelects.mago) {
-        modelSelects.mago.addEventListener('change', (e) => handleModelChange(3, e.target.value));
+    if (!trigger || !dropdown || !optionsContainer) {
+        console.log(`[Models] Dropdown ${instance} (${prefix}) não encontrado`);
+        return;
     }
 
-    // Adicionar event listeners para filtros
-    setupModelFilters(modelLists);
+    // Atualizar texto do trigger com modelo selecionado
+    const updateTriggerText = (text) => {
+        const textSpan = trigger.querySelector('.selected-text');
+        if (textSpan) textSpan.textContent = text;
+    };
+
+    // Encontrar nome do modelo selecionado
+    const selectedModel = models.find(m => m.id === selectedModels[key]);
+    if (selectedModel) {
+        updateTriggerText(formatModelName(selectedModel));
+    }
+
+    // Callback de seleção
+    const onSelect = (modelId, modelName) => {
+        selectedModels[key] = modelId;
+        updateTriggerText(modelName);
+
+        // Fechar dropdown
+        dropdown.hidden = true;
+        wrapper?.classList.remove('open');
+
+        // Limpar filtro
+        if (filter) filter.value = '';
+
+        // Salvar e emitir evento (apenas para dropdowns do header)
+        if (!prefix) {
+            saveModelsToStorage();
+            window.dispatchEvent(new CustomEvent('modelsChanged', {
+                detail: { instance, modelId, allModels: selectedModels }
+            }));
+        }
+
+        console.log(`[Models] ${instance}ª Instância (${prefix || 'header'}) alterada para:`, modelId);
+    };
+
+    // Renderizar opções iniciais
+    renderDropdownOptions(optionsContainer, models, selectedModels[key], '', onSelect);
+
+    // Event: Abrir/fechar dropdown
+    trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = !dropdown.hidden;
+
+        // Fechar todos os outros dropdowns primeiro
+        document.querySelectorAll('.custom-select-dropdown').forEach(d => {
+            d.hidden = true;
+            d.closest('.custom-select-wrapper')?.classList.remove('open');
+        });
+
+        if (!isOpen) {
+            dropdown.hidden = false;
+            wrapper?.classList.add('open');
+            filter?.focus();
+            // Re-renderizar para garantir estado atualizado
+            renderDropdownOptions(optionsContainer, models, selectedModels[key], filter?.value || '', onSelect);
+        }
+    });
+
+    // Event: Filtrar modelos
+    if (filter) {
+        filter.addEventListener('input', (e) => {
+            renderDropdownOptions(optionsContainer, models, selectedModels[key], e.target.value, onSelect);
+        });
+
+        // Prevenir fechamento ao clicar no filtro
+        filter.addEventListener('click', (e) => e.stopPropagation());
+    }
 }
 
 
 /**
- * Configura os event listeners dos campos de filtro
- * @param {Object} modelLists - Listas de modelos {withTools, all}
+ * Inicializa todos os dropdowns do header
  */
-function setupModelFilters(modelLists) {
-    // Filtro para 1ª Instância
-    if (modelFilters.primary) {
-        modelFilters.primary.addEventListener('input', (e) => {
-            renderModelOptions(
-                modelSelects.primary,
-                modelLists.withTools,
-                selectedModels.primary,
-                e.target.value
-            );
-        });
-    }
+function initHeaderDropdowns(modelLists) {
+    console.log('[Models] Inicializando dropdowns do header...');
 
-    // Filtro para 2ª Instância
-    if (modelFilters.secondary) {
-        modelFilters.secondary.addEventListener('input', (e) => {
-            renderModelOptions(
-                modelSelects.secondary,
-                modelLists.withTools,
-                selectedModels.secondary,
-                e.target.value
-            );
-        });
-    }
+    // 1ª e 2ª Instância: modelos com tools
+    initCustomDropdown(1, '', modelLists.withTools);
+    initCustomDropdown(2, '', modelLists.withTools);
 
-    // Filtro para Mago
-    if (modelFilters.mago) {
-        modelFilters.mago.addEventListener('input', (e) => {
-            renderModelOptions(
-                modelSelects.mago,
-                modelLists.all,
-                selectedModels.mago,
-                e.target.value
-            );
-        });
-    }
+    // Mago: todos os modelos
+    initCustomDropdown(3, '', modelLists.all);
 }
 
 
 /**
- * Handler para mudança de modelo em qualquer instância
- * Salva seleção no localStorage e emite evento de mudança
- * @param {number} instance - Número da instância (1, 2 ou 3)
- * @param {string} modelId - ID do modelo selecionado
+ * Inicializa todos os dropdowns do modal
+ */
+function initModalDropdowns(modelLists) {
+    console.log('[Models] Inicializando dropdowns do modal...');
+
+    initCustomDropdown(1, 'modal-', modelLists.withTools);
+    initCustomDropdown(2, 'modal-', modelLists.withTools);
+    initCustomDropdown(3, 'modal-', modelLists.all);
+}
+
+
+/**
+ * Handler para mudança de modelo
  */
 function handleModelChange(instance, modelId) {
     const key = INSTANCE_MAP[instance];
-
     console.log(`[Models] ${instance}ª Instância alterada para:`, modelId);
-
-    // Atualizar estado
     selectedModels[key] = modelId;
-
-    // Salvar no localStorage
     saveModelsToStorage();
-
-    // Emitir evento customizado para notificar outras partes do sistema
     window.dispatchEvent(new CustomEvent('modelsChanged', {
-        detail: {
-            instance: instance,
-            modelId: modelId,
-            allModels: selectedModels
-        }
+        detail: { instance, modelId, allModels: selectedModels }
     }));
 }
 
 
 /**
  * Salva modelos selecionados no localStorage
- * Permite persistência entre sessões do navegador
  */
 function saveModelsToStorage() {
     localStorage.setItem('zeus_models', JSON.stringify(selectedModels));
@@ -342,29 +325,17 @@ function saveModelsToStorage() {
 
 /**
  * Carrega modelos salvos do localStorage
- * Restaura seleções anteriores do usuário
  */
 function loadModelsFromStorage() {
     const saved = localStorage.getItem('zeus_models');
-
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
-
-            // Atualizar apenas as chaves existentes
-            if (parsed.primary) {
-                selectedModels.primary = parsed.primary;
-            }
-            if (parsed.secondary) {
-                selectedModels.secondary = parsed.secondary;
-            }
-            // Compatibilidade: aceitar tanto 'tertiary' (antigo) quanto 'mago' (novo)
-            if (parsed.mago) {
-                selectedModels.mago = parsed.mago;
-            } else if (parsed.tertiary) {
-                selectedModels.mago = parsed.tertiary;
-            }
-
+            if (parsed.primary) selectedModels.primary = parsed.primary;
+            if (parsed.secondary) selectedModels.secondary = parsed.secondary;
+            // Compatibilidade: aceitar 'tertiary' antigo
+            if (parsed.mago) selectedModels.mago = parsed.mago;
+            else if (parsed.tertiary) selectedModels.mago = parsed.tertiary;
             console.log('[Models] Modelos carregados do localStorage');
         } catch (error) {
             console.error('[Models] Erro ao carregar modelos salvos:', error);
@@ -375,8 +346,6 @@ function loadModelsFromStorage() {
 
 /**
  * Retorna os modelos atualmente selecionados
- * Usado pelo chat.js para enviar ao backend
- * @returns {object} Objeto com primary, secondary e mago
  */
 function getSelectedModels() {
     return {
@@ -389,9 +358,6 @@ function getSelectedModels() {
 
 /**
  * Retorna modelo de uma instância específica
- * Mantido para compatibilidade com código legado
- * @param {number} instance - Número da instância (1, 2 ou 3), padrão 1
- * @returns {string} ID do modelo selecionado
  */
 function getSelectedModel(instance = 1) {
     const key = INSTANCE_MAP[instance] || 'primary';
@@ -401,68 +367,16 @@ function getSelectedModel(instance = 1) {
 
 /**
  * Define modelo para uma instância específica
- * @param {string} modelId - ID do modelo
- * @param {number} instance - Número da instância (1, 2 ou 3), padrão 1
  */
 function setSelectedModel(modelId, instance = 1) {
     const key = INSTANCE_MAP[instance] || 'primary';
     selectedModels[key] = modelId;
-
-    // Atualizar UI se o select existir
-    const select = modelSelects[key];
-    if (select) {
-        select.value = modelId;
-    }
-
     saveModelsToStorage();
 }
 
 
 /**
- * Inicializa o gerenciador de modelos
- * Carrega modelos salvos e busca lista atualizada do servidor
- */
-async function initModels() {
-    console.log('[Models] Inicializando gerenciador de modelos...');
-
-    // Recuperar modelos salvos do localStorage
-    loadModelsFromStorage();
-
-    // Carregar ambas as listas de modelos do servidor
-    // - withTools: para 1ª e 2ª Instância (necessário para tool calling)
-    // - all: para Mago (modelo poderoso)
-    const modelLists = await loadAllModelLists();
-
-    // Renderizar todos os seletores com as listas apropriadas
-    renderAllModelSelectors(modelLists);
-
-    // Inicializar modal mobile
-    initModelsModal(modelLists);
-
-    console.log('[Models] Inicialização concluída');
-}
-
-
-// =====================================================
-// MODAL DE SELEÇÃO DE MODELOS (MOBILE)
-// =====================================================
-
-// Referências aos elementos do modal
-let modalSelects = {
-    primary: null,
-    secondary: null,
-    mago: null
-};
-
-let modalFilters = {
-    primary: null,
-    secondary: null,
-    mago: null
-};
-
-/**
- * Inicializa o modal de seleção de modelos para mobile
- * @param {Object} modelLists - Listas de modelos {withTools, all}
+ * Inicializa o modal de seleção de modelos
  */
 function initModelsModal(modelLists) {
     const modal = document.getElementById('models-modal');
@@ -470,144 +384,173 @@ function initModelsModal(modelLists) {
     const btnClose = document.getElementById('btn-close-models-modal');
     const btnConfirm = document.getElementById('btn-confirm-models');
 
-    if (!modal || !btnOpen) {
-        console.log('[Models] Modal mobile não encontrado na página');
+    if (!modal) {
+        console.log('[Models] Modal não encontrado');
         return;
     }
 
-    // Capturar referências aos selects do modal
-    modalSelects.primary = document.getElementById('modal-model-select-1');
-    modalSelects.secondary = document.getElementById('modal-model-select-2');
-    modalSelects.mago = document.getElementById('modal-model-select-3');
+    // Inicializar dropdowns do modal
+    initModalDropdowns(modelLists);
 
-    // Capturar referências aos filtros do modal
-    modalFilters.primary = document.getElementById('modal-model-filter-1');
-    modalFilters.secondary = document.getElementById('modal-model-filter-2');
-    modalFilters.mago = document.getElementById('modal-model-filter-3');
-
-    // Popular selects do modal
-    renderModelOptions(modalSelects.primary, modelLists.withTools, selectedModels.primary);
-    renderModelOptions(modalSelects.secondary, modelLists.withTools, selectedModels.secondary);
-    renderModelOptions(modalSelects.mago, modelLists.all, selectedModels.mago);
-
-    // Configurar filtros do modal
-    setupModalFilters(modelLists);
+    // Função para fechar o modal
+    const closeModal = () => {
+        modal.hidden = true;
+        modal.style.display = 'none';
+        console.log('[Models] Modal fechado');
+    };
 
     // Event: Abrir modal
-    btnOpen.addEventListener('click', () => {
-        // Sincronizar valores do modal com os valores atuais
-        if (modalSelects.primary) modalSelects.primary.value = selectedModels.primary;
-        if (modalSelects.secondary) modalSelects.secondary.value = selectedModels.secondary;
-        if (modalSelects.mago) modalSelects.mago.value = selectedModels.mago;
-
-        modal.hidden = false;
-        modal.style.display = 'flex';
-    });
+    if (btnOpen) {
+        btnOpen.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Sincronizar valores antes de abrir
+            syncModalWithState(modelLists);
+            // Re-renderizar dropdowns do modal
+            initModalDropdowns(modelLists);
+            modal.hidden = false;
+            modal.style.display = 'flex';
+            console.log('[Models] Modal aberto');
+        });
+    }
 
     // Event: Fechar modal (botão X)
     if (btnClose) {
-        btnClose.addEventListener('click', () => {
-            modal.hidden = true;
-            modal.style.display = 'none';
+        btnClose.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeModal();
+        });
+        // Evento touch para mobile
+        btnClose.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeModal();
         });
     }
 
     // Event: Fechar modal (clique no overlay)
     modal.addEventListener('click', (e) => {
+        // Apenas fechar se clicar diretamente no overlay (não nos filhos)
         if (e.target === modal) {
-            modal.hidden = true;
-            modal.style.display = 'none';
+            closeModal();
         }
     });
 
     // Event: Confirmar seleção
     if (btnConfirm) {
-        btnConfirm.addEventListener('click', () => {
-            // Ler valores dos selects do modal
-            const newPrimary = modalSelects.primary?.value || selectedModels.primary;
-            const newSecondary = modalSelects.secondary?.value || selectedModels.secondary;
-            const newMago = modalSelects.mago?.value || selectedModels.mago;
-
-            // Atualizar estado global
-            selectedModels.primary = newPrimary;
-            selectedModels.secondary = newSecondary;
-            selectedModels.mago = newMago;
-
-            // Sincronizar com selects do header (se existirem)
-            if (modelSelects.primary) modelSelects.primary.value = newPrimary;
-            if (modelSelects.secondary) modelSelects.secondary.value = newSecondary;
-            if (modelSelects.mago) modelSelects.mago.value = newMago;
-
+        btnConfirm.addEventListener('click', (e) => {
+            e.stopPropagation();
             // Salvar no localStorage
             saveModelsToStorage();
 
+            // Sincronizar com dropdowns do header
+            syncHeaderWithState(modelLists);
+
             // Emitir evento de mudança
             window.dispatchEvent(new CustomEvent('modelsChanged', {
-                detail: {
-                    instance: 'all',
-                    allModels: selectedModels
-                }
+                detail: { instance: 'all', allModels: selectedModels }
             }));
 
             // Fechar modal
-            modal.hidden = true;
-            modal.style.display = 'none';
+            closeModal();
 
-            console.log('[Models] Modelos selecionados via modal:', selectedModels);
+            console.log('[Models] Modelos confirmados:', selectedModels);
         });
     }
 
-    console.log('[Models] Modal mobile inicializado');
+    // Prevenir que cliques dentro do modal fechem ele
+    const modalContent = modal.querySelector('.modal');
+    if (modalContent) {
+        modalContent.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+    }
+
+    console.log('[Models] Modal inicializado');
 }
 
 
 /**
- * Configura os event listeners dos filtros do modal
- * @param {Object} modelLists - Listas de modelos {withTools, all}
+ * Sincroniza os dropdowns do modal com o estado atual
  */
-function setupModalFilters(modelLists) {
-    // Filtro para 1ª Instância (modal)
-    if (modalFilters.primary) {
-        modalFilters.primary.addEventListener('input', (e) => {
-            renderModelOptions(
-                modalSelects.primary,
-                modelLists.withTools,
-                selectedModels.primary,
-                e.target.value
-            );
-        });
-    }
-
-    // Filtro para 2ª Instância (modal)
-    if (modalFilters.secondary) {
-        modalFilters.secondary.addEventListener('input', (e) => {
-            renderModelOptions(
-                modalSelects.secondary,
-                modelLists.withTools,
-                selectedModels.secondary,
-                e.target.value
-            );
-        });
-    }
-
-    // Filtro para Mago (modal)
-    if (modalFilters.mago) {
-        modalFilters.mago.addEventListener('input', (e) => {
-            renderModelOptions(
-                modalSelects.mago,
-                modelLists.all,
-                selectedModels.mago,
-                e.target.value
-            );
-        });
-    }
+function syncModalWithState(modelLists) {
+    [1, 2, 3].forEach(instance => {
+        const key = INSTANCE_MAP[instance];
+        const triggerId = `modal-trigger-${instance}`;
+        const trigger = document.getElementById(triggerId);
+        if (trigger) {
+            const models = instance === 3 ? modelLists.all : modelLists.withTools;
+            const selectedModel = models.find(m => m.id === selectedModels[key]);
+            const textSpan = trigger.querySelector('.selected-text');
+            if (textSpan && selectedModel) {
+                textSpan.textContent = formatModelName(selectedModel);
+            }
+        }
+    });
 }
+
+
+/**
+ * Sincroniza os dropdowns do header com o estado atual
+ */
+function syncHeaderWithState(modelLists) {
+    [1, 2, 3].forEach(instance => {
+        const key = INSTANCE_MAP[instance];
+        const triggerId = `trigger-${instance}`;
+        const trigger = document.getElementById(triggerId);
+        if (trigger) {
+            const models = instance === 3 ? modelLists.all : modelLists.withTools;
+            const selectedModel = models.find(m => m.id === selectedModels[key]);
+            const textSpan = trigger.querySelector('.selected-text');
+            if (textSpan && selectedModel) {
+                textSpan.textContent = formatModelName(selectedModel);
+            }
+        }
+    });
+}
+
+
+/**
+ * Inicializa o gerenciador de modelos
+ */
+async function initModels() {
+    console.log('[Models] Inicializando gerenciador de modelos...');
+
+    // Recuperar modelos salvos do localStorage
+    loadModelsFromStorage();
+
+    // Carregar listas de modelos do servidor
+    const modelLists = await loadAllModelLists();
+
+    // Inicializar dropdowns do header
+    initHeaderDropdowns(modelLists);
+
+    // Inicializar modal
+    initModelsModal(modelLists);
+
+    console.log('[Models] Inicialização concluída');
+}
+
+
+// Fechar dropdowns ao clicar fora (mas não dentro do modal)
+document.addEventListener('click', (e) => {
+    // Não fechar se clicar dentro do modal de modelos
+    const modelsModal = document.getElementById('models-modal');
+    if (modelsModal && modelsModal.contains(e.target)) {
+        return;
+    }
+
+    document.querySelectorAll('.custom-select-dropdown').forEach(d => {
+        d.hidden = true;
+        d.closest('.custom-select-wrapper')?.classList.remove('open');
+    });
+});
 
 
 // Inicializar quando DOM estiver pronto
 document.addEventListener('DOMContentLoaded', function () {
-    // Só inicializa se os seletores existirem na página
-    if (document.getElementById('model-select-1')) {
+    // Só inicializa se os elementos existirem na página
+    if (document.getElementById('trigger-1') || document.getElementById('btn-open-models-modal')) {
         initModels();
     }
 });

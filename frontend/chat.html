@@ -89,8 +89,18 @@
                 <!-- 1ª Instância (Modelo Primário) -->
                 <div class="model-selector-item">
                     <label for="model-select-1">1ª Instância</label>
-                    <input type="text" id="model-filter-1" class="model-filter" placeholder="Filtrar...">
-                    <select id="model-select-1">
+                    <div class="custom-select-wrapper" data-instance="1">
+                        <div class="custom-select-trigger" id="trigger-1">
+                            <span class="selected-text">Carregando...</span>
+                            <span class="arrow">▼</span>
+                        </div>
+                        <div class="custom-select-dropdown" id="dropdown-1" hidden>
+                            <input type="text" class="dropdown-filter" id="model-filter-1"
+                                placeholder="Buscar modelo...">
+                            <div class="dropdown-options" id="options-1"></div>
+                        </div>
+                    </div>
+                    <select id="model-select-1" style="display:none;">
                         <option value="">Carregando...</option>
                     </select>
                 </div>
@@ -98,8 +108,18 @@
                 <!-- 2ª Instância (Modelo Secundário / Fallback 1) -->
                 <div class="model-selector-item">
                     <label for="model-select-2">2ª Instância</label>
-                    <input type="text" id="model-filter-2" class="model-filter" placeholder="Filtrar...">
-                    <select id="model-select-2">
+                    <div class="custom-select-wrapper" data-instance="2">
+                        <div class="custom-select-trigger" id="trigger-2">
+                            <span class="selected-text">Carregando...</span>
+                            <span class="arrow">▼</span>
+                        </div>
+                        <div class="custom-select-dropdown" id="dropdown-2" hidden>
+                            <input type="text" class="dropdown-filter" id="model-filter-2"
+                                placeholder="Buscar modelo...">
+                            <div class="dropdown-options" id="options-2"></div>
+                        </div>
+                    </div>
+                    <select id="model-select-2" style="display:none;">
                         <option value="">Carregando...</option>
                     </select>
                 </div>
@@ -107,8 +127,18 @@
                 <!-- Mago (Modelo Poderoso / Última Instância) -->
                 <div class="model-selector-item">
                     <label for="model-select-3">🧙 Mago</label>
-                    <input type="text" id="model-filter-3" class="model-filter" placeholder="Filtrar...">
-                    <select id="model-select-3">
+                    <div class="custom-select-wrapper" data-instance="3">
+                        <div class="custom-select-trigger" id="trigger-3">
+                            <span class="selected-text">Carregando...</span>
+                            <span class="arrow">▼</span>
+                        </div>
+                        <div class="custom-select-dropdown" id="dropdown-3" hidden>
+                            <input type="text" class="dropdown-filter" id="model-filter-3"
+                                placeholder="Buscar modelo...">
+                            <div class="dropdown-options" id="options-3"></div>
+                        </div>
+                    </div>
+                    <select id="model-select-3" style="display:none;">
                         <option value="">Carregando...</option>
                     </select>
                 </div>
@@ -141,9 +171,9 @@
                     </ul>
                     <!-- Hint para desktop -->
                     <p class="welcome-hint desktop-only">Digite uma mensagem para começar...</p>
-                    <!-- Botão para mobile -->
-                    <button class="btn-select-models mobile-only" id="btn-open-models-modal">
-                        🧙 Selecionar Modelos
+                    <!-- Botão para selecionar modelos (desktop e mobile) -->
+                    <button class="btn-select-models" id="btn-open-models-modal">
+                        Selecionar Modelos
                     </button>
                 </div>
             </div>
@@ -236,33 +266,63 @@
     <div class="modal-overlay" id="models-modal" hidden>
         <div class="modal models-modal">
             <div class="modal-header">
-                <h3>🧙 Selecionar Modelos</h3>
+                <h3>Selecionar Modelos</h3>
                 <button class="modal-close" id="btn-close-models-modal">&times;</button>
             </div>
             <div class="modal-body">
                 <!-- 1ª Instância -->
                 <div class="modal-model-item">
-                    <label for="modal-model-select-1">1ª Instância</label>
-                    <input type="text" id="modal-model-filter-1" class="model-filter" placeholder="Filtrar modelos...">
-                    <select id="modal-model-select-1">
+                    <label>1ª Instância</label>
+                    <div class="custom-select-wrapper modal-custom-select" data-modal-instance="1">
+                        <div class="custom-select-trigger" id="modal-trigger-1">
+                            <span class="selected-text">Carregando...</span>
+                            <span class="arrow">▼</span>
+                        </div>
+                        <div class="custom-select-dropdown" id="modal-dropdown-1" hidden>
+                            <input type="text" class="dropdown-filter" id="modal-model-filter-1"
+                                placeholder="Buscar modelo...">
+                            <div class="dropdown-options" id="modal-options-1"></div>
+                        </div>
+                    </div>
+                    <select id="modal-model-select-1" style="display:none;">
                         <option value="">Carregando...</option>
                     </select>
                 </div>
 
                 <!-- 2ª Instância -->
                 <div class="modal-model-item">
-                    <label for="modal-model-select-2">2ª Instância</label>
-                    <input type="text" id="modal-model-filter-2" class="model-filter" placeholder="Filtrar modelos...">
-                    <select id="modal-model-select-2">
+                    <label>2ª Instância</label>
+                    <div class="custom-select-wrapper modal-custom-select" data-modal-instance="2">
+                        <div class="custom-select-trigger" id="modal-trigger-2">
+                            <span class="selected-text">Carregando...</span>
+                            <span class="arrow">▼</span>
+                        </div>
+                        <div class="custom-select-dropdown" id="modal-dropdown-2" hidden>
+                            <input type="text" class="dropdown-filter" id="modal-model-filter-2"
+                                placeholder="Buscar modelo...">
+                            <div class="dropdown-options" id="modal-options-2"></div>
+                        </div>
+                    </div>
+                    <select id="modal-model-select-2" style="display:none;">
                         <option value="">Carregando...</option>
                     </select>
                 </div>
 
                 <!-- Mago -->
                 <div class="modal-model-item">
-                    <label for="modal-model-select-3">🧙 Mago</label>
-                    <input type="text" id="modal-model-filter-3" class="model-filter" placeholder="Filtrar modelos...">
-                    <select id="modal-model-select-3">
+                    <label>🧙 Mago</label>
+                    <div class="custom-select-wrapper modal-custom-select" data-modal-instance="3">
+                        <div class="custom-select-trigger" id="modal-trigger-3">
+                            <span class="selected-text">Carregando...</span>
+                            <span class="arrow">▼</span>
+                        </div>
+                        <div class="custom-select-dropdown" id="modal-dropdown-3" hidden>
+                            <input type="text" class="dropdown-filter" id="modal-model-filter-3"
+                                placeholder="Buscar modelo...">
+                            <div class="dropdown-options" id="modal-options-3"></div>
+                        </div>
+                    </div>
+                    <select id="modal-model-select-3" style="display:none;">
                         <option value="">Carregando...</option>
                     </select>
                 </div>
