@@ -254,7 +254,8 @@ class BackgroundWorker:
                 websocket=None,  # Não há WebSocket direto
                 custom_models=task.models,
                 cancel_state={"cancelled": False, "active_process": None},
-                progress_callback=progress_callback  # Novo parâmetro
+                progress_callback=progress_callback,  # Novo parâmetro
+                require_completion_tool=True  # EXIGIR finish_task para background tasks
             )
             
             # Adiciona resposta à conversa

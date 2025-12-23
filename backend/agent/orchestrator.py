@@ -395,7 +395,19 @@ class AgentOrchestrator:
             tool_calls = response.get("tool_calls", [])
             
             if not tool_calls:
-                # Resposta final - sem mais tools a executar
+                # Se não houver tool calls e require_completion_tool for True, NÃO terminar
+                # a menos que a mensagem final seja muito curta/erro (previne loops infinitos de erro)
+                require_completion = kwargs.get("require_completion_tool", False)
+                
+                if require_completion:
+                    logger.info("Ferramenta 'finish_task' obrigatória, mas não foi chamada. Forçando continuação.")
+                    messages.append({
+                        "role": "user",
+                        "content": "Você AINDA NÃO usou a tool 'finish_task'. Você DEVE usar 'finish_task' para encerrar. Se ainda não terminou, use as tools necessárias. NÃO Responda apenas com texto."
+                    })
+                    continue
+
+                # Resposta final padrão - sem mais tools a executar
                 logger.info(
                     "Resposta final",
                     content_length=len(response.get("content", ""))
@@ -403,6 +415,13 @@ class AgentOrchestrator:
                 await self._send_log_feedback(websocket, "Resposta final gerada", progress_callback)
                 await self.cleanup_resources(conversation.id)
                 return response
+            
+            # Verificar se alguma tool é finish_task
+            is_finished = False
+            for tc in tool_calls:
+                if tc["function"]["name"] == "finish_task":
+                    is_finished = True
+                    break
             
             # Executar cada tool call
             logger.info(
