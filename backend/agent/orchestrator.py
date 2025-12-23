@@ -222,7 +222,8 @@ class AgentOrchestrator:
         websocket: Optional[WebSocket] = None,
         custom_models: Optional[Dict[str, str]] = None,
         cancel_state: Optional[Dict[str, Any]] = None,
-        progress_callback: Optional[Callable[[str, str], Any]] = None
+        progress_callback: Optional[Callable[[str, str], Any]] = None,
+        **kwargs
     ) -> Dict[str, Any]:
         """
         Processa uma mensagem do usuário e retorna resposta.
