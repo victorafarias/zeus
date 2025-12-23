@@ -425,9 +425,9 @@ ol {
    ============================================ */
 .chat-page {
     display: flex;
-    /* Usa svh (small viewport height) para mobile + fallback */
-    height: 100vh;
-    height: 100svh;
+    position: fixed;
+    inset: 0;
+    width: 100%;
     overflow: hidden;
     /* Garante que o conteúdo não fique atrás da barra de status/notch */
     padding-top: env(safe-area-inset-top, 0px);
@@ -638,7 +638,7 @@ ol {
     flex-shrink: 0;
     position: sticky;
     top: 0;
-    z-index: 10;
+    z-index: 1000;
 }
 
 .btn-toggle-sidebar {
@@ -765,6 +765,7 @@ ol {
     flex: 1;
     overflow-y: auto;
     padding: 1.5rem;
+    min-height: 0;
 }
 
 /* Tela de Boas-Vindas */
@@ -1424,7 +1425,7 @@ ol {
     .input-area {
         padding: 0.75rem 1rem;
         /* Padding extra para evitar que a barra de navegação do móvel corte o input */
-        padding-bottom: calc(1rem + env(safe-area-inset-bottom, 16px));
+        padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 20px));
     }
 
     /* Chat header mais compacto no mobile */
