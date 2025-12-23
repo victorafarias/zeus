@@ -1,5 +1,5 @@
 from typing import Dict, Any
-from .base import BaseTool
+from .base import BaseTool, ToolParameter
 
 class FinishTaskTool(BaseTool):
     """
@@ -7,26 +7,17 @@ class FinishTaskTool(BaseTool):
     Deve ser usada quando o agente tiver concluído TODO o trabalho solicitado.
     """
     
-    @property
-    def name(self) -> str:
-        return "finish_task"
-        
-    @property
-    def description(self) -> str:
-        return "Finaliza a tarefa atual. Use APENAS quando todo o trabalho estiver concluído e verificado."
-        
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "result": {
-                    "type": "string",
-                    "description": "O resultado final da tarefa ou um resumo do que foi feito."
-                }
-            },
-            "required": ["result"]
-        }
+    name = "finish_task"
+    description = "Finaliza a tarefa atual. Use APENAS quando todo o trabalho estiver concluído e verificado."
+    
+    parameters = [
+        ToolParameter(
+            name="result",
+            type="string",
+            description="O resultado final da tarefa ou um resumo do que foi feito.",
+            required=True
+        )
+    ]
         
     async def execute(self, result: str, **kwargs) -> Dict[str, Any]:
         """
