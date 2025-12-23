@@ -21,6 +21,7 @@ from .ssh_tunnel_publisher import SSHTunnelPublisherTool
 from .yt_downloader import YouTubeDownloaderTool
 from .yt_transcriber import YouTubeTranscriberTool
 from .web_search_tool import WebSearchTool
+from .split_text_files import SplitTextFilesTool
 
 from config import get_logger
 
@@ -50,6 +51,7 @@ TOOLS: List[BaseTool] = [
     YouTubeDownloaderTool(),
     YouTubeTranscriberTool(),
     WebSearchTool(),
+    SplitTextFilesTool(),
 ]
 
 # Dicionário para acesso rápido por nome
