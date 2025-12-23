@@ -234,7 +234,8 @@ async def websocket_chat(
                 custom_models = {
                     "primary": models_data.get("primary", settings.primary_model),
                     "secondary": models_data.get("secondary", settings.secondary_model),
-                    "mago": models_data.get("mago", settings.secondary_model)
+                    "mago": models_data.get("mago") or models_data.get("tertiary", settings.secondary_model),
+                    "tertiary": models_data.get("tertiary") or models_data.get("mago", settings.secondary_model)
                 }
                 
                 if not content and not attached_files:
