@@ -1426,6 +1426,7 @@ ol {
         padding: 0.75rem 1rem;
         /* Padding extra para evitar que a barra de navegação do móvel corte o input */
         padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 20px));
+        margin-bottom: 1em !important;
     }
 
     /* Chat header mais compacto no mobile */
