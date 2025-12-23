@@ -8,7 +8,8 @@
 // Estado do chat
 let websocket = null;
 let isConnected = false;
-let isProcessing = false;
+// Estado de processamento por conversa (permite múltiplas conversas processando em paralelo)
+const processingByConversation = new Map(); // conversation_id -> boolean
 let pendingFiles = [];
 let toolModalTimeout = null;
 
@@ -89,6 +90,90 @@ function connectWebSocket(conversationId = null) {
 
 
 /**
+ * Retorna o ID da conversa atual
+ * @returns {string|null} ID da conversa ou null
+ */
+function getCurrentConversationId() {
+    const conversation = Conversations.getCurrentConversation();
+    return conversation ? conversation.id : null;
+}
+
+
+/**
+ * Define o estado de processamento de uma conversa
+ * @param {string} conversationId - ID da conversa
+ * @param {boolean} processing - Se está processando
+ */
+function setConversationProcessing(conversationId, processing) {
+    if (!conversationId) return;
+
+    processingByConversation.set(conversationId, processing);
+    console.log(`[Chat] Conversa ${conversationId.substring(0, 8)}... processando: ${processing}`);
+
+    // Atualizar loader na sidebar
+    updateSidebarLoader(conversationId, processing);
+}
+
+
+/**
+ * Verifica se uma conversa está processando
+ * @param {string} conversationId - ID da conversa
+ * @returns {boolean} Se está processando
+ */
+function isConversationProcessing(conversationId) {
+    return processingByConversation.get(conversationId) || false;
+}
+
+
+/**
+ * Verifica se a conversa ATUAL está processando
+ * @returns {boolean} Se a conversa atual está processando
+ */
+function isCurrentConversationProcessing() {
+    const convId = getCurrentConversationId();
+    return convId ? isConversationProcessing(convId) : false;
+}
+
+
+/**
+ * Atualiza o loader visual na sidebar para indicar processamento
+ * @param {string} conversationId - ID da conversa
+ * @param {boolean} processing - Se está processando
+ */
+function updateSidebarLoader(conversationId, processing) {
+    const conversationItem = document.querySelector(`.conversation-item[data-id="${conversationId}"]`);
+
+    if (!conversationItem) return;
+
+    // Remover loader existente se houver
+    const existingLoader = conversationItem.querySelector('.processing-loader');
+    if (existingLoader) {
+        existingLoader.remove();
+    }
+
+    // Adicionar loader se estiver processando
+    if (processing) {
+        const loader = document.createElement('div');
+        loader.className = 'processing-loader';
+        loader.title = 'Processando...';
+        loader.innerHTML = `
+            <svg class="spinner" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="31.415 31.415" />
+            </svg>
+        `;
+
+        // Inserir antes das actions (botão de deletar)
+        const actions = conversationItem.querySelector('.conversation-actions');
+        if (actions) {
+            conversationItem.insertBefore(loader, actions);
+        } else {
+            conversationItem.appendChild(loader);
+        }
+    }
+}
+
+
+/**
  * Atualiza logs da tool em execução
  * @param {string} output - Texto do log
  */
@@ -135,7 +220,7 @@ function handleWebSocketMessage(event) {
                 hideToolModal(); // Garantir que modal está fechado
                 hideCancelButton(); // Esconder botão de cancelar
                 addMessage('assistant', data.content, data.tool_calls);
-                isProcessing = false;
+                setConversationProcessing(getCurrentConversationId(), false);
                 enableInput();
                 break;
 
@@ -145,7 +230,7 @@ function handleWebSocketMessage(event) {
                 hideToolModal();
                 hideCancelButton();
                 addMessage('system', `⛔ ${data.content || 'Processamento cancelado pelo usuário.'}`);
-                isProcessing = false;
+                setConversationProcessing(getCurrentConversationId(), false);
                 enableInput();
                 break;
 
@@ -184,7 +269,7 @@ function handleWebSocketMessage(event) {
                 hideToolModal();
                 hideCancelButton();
                 addMessage('system', `❌ ${data.content}`);
-                isProcessing = false;
+                setConversationProcessing(getCurrentConversationId(), false);
                 enableInput();
                 break;
 
@@ -205,7 +290,7 @@ function handleWebSocketMessage(event) {
                     if (data.result) {
                         addMessage('assistant', data.result, data.tool_calls);
                     }
-                    isProcessing = false;
+                    setConversationProcessing(getCurrentConversationId(), false);
                     enableInput();
                     // Recarregar conversa para pegar mensagens salvas
                     Conversations.loadConversations();
@@ -213,7 +298,7 @@ function handleWebSocketMessage(event) {
                     hideTypingIndicator();
                     hideCancelButton();
                     addMessage('system', `❌ Erro no processamento: ${data.error || 'Erro desconhecido'}`);
-                    isProcessing = false;
+                    setConversationProcessing(getCurrentConversationId(), false);
                     enableInput();
                 } else if (data.status === 'processing') {
                     showTypingIndicator(`Processando tarefa...`);
@@ -295,9 +380,9 @@ function sendMessage(content) {
     // Esconder tela de boas-vindas
     hideWelcomeScreen();
 
-    // Desabilitar input
+    // Desabilitar input e marcar conversa como processando
     disableInput();
-    isProcessing = true;
+    setConversationProcessing(conversation.id, true);
 
     // Mostrar indicador de digitação e botão de cancelar
     showTypingIndicator();
@@ -308,10 +393,12 @@ function sendMessage(content) {
 
     // Enviar via WebSocket
     // Incluir os três modelos selecionados para o sistema de fallback
+    // Usar modo BACKGROUND para permitir processamento paralelo e independente
     const selectedModels = Models.getSelectedModels();
     const message = {
         type: 'message',
         content: content,
+        background: true,  // SEMPRE usar background para permitir processamento paralelo
         models: {
             primary: selectedModels.primary,
             secondary: selectedModels.secondary,
@@ -323,7 +410,7 @@ function sendMessage(content) {
     console.log('[Chat] Enviando mensagem com modelos:', selectedModels);
     console.log('[Chat] Arquivos anexados:', attachedFileIds);
     websocket.send(JSON.stringify(message));
-    console.log('[Chat] Mensagem enviada');
+    console.log('[Chat] Mensagem enviada (modo background)');
 
     // Limpar arquivos pendentes e esconder preview
     pendingFiles = [];
@@ -589,7 +676,7 @@ function hideTypingIndicator() {
     if (typingIndicator) {
         typingIndicator.hidden = true;
         typingIndicator.style.display = 'none';
-        isProcessing = false; // Resetar estado caso esteja preso
+        // Não resetar estado aqui - o estado é controlado por conversa
     }
 }
 
@@ -715,7 +802,7 @@ function hideCancelButton() {
  * Cancela o processamento atual
  */
 function cancelProcessing() {
-    if (!isProcessing) {
+    if (!isCurrentConversationProcessing()) {
         console.log('[Chat] Nenhum processamento em andamento para cancelar');
         return;
     }
@@ -779,7 +866,8 @@ function initChat() {
         messageForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const content = messageInput.value.trim();
-            if (content && !isProcessing) {
+            // Permitir envio mesmo se outra conversa estiver processando (paralelo)
+            if (content) {
                 sendMessage(content);
                 messageInput.value = '';
                 autoResize(messageInput);

@@ -588,6 +588,28 @@ ol {
     height: 16px;
 }
 
+/* Loader de Processamento na Sidebar */
+.processing-loader {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-left: auto;
+    margin-right: 0.5rem;
+}
+
+.processing-loader .spinner {
+    width: 18px;
+    height: 18px;
+    color: var(--color-accent-primary);
+    animation: spin 1s linear infinite;
+}
+
+/* Mostrar actions mesmo com loader */
+.conversation-item:hover .processing-loader {
+    margin-right: 0.25rem;
+}
+
 /* Footer da Sidebar */
 .sidebar-footer {
     padding: 1rem;

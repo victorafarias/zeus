@@ -333,7 +333,8 @@ def get_background_worker() -> BackgroundWorker:
     global _worker
     if _worker is None:
         _worker = BackgroundWorker(
-            max_concurrent_tasks=3,  # Processa até 3 tarefas em paralelo
+            # Aumentado para 5 tarefas paralelas para suportar múltiplos chats simultaneamente
+            max_concurrent_tasks=5,
             poll_interval=1.0,  # Verifica novas tarefas a cada 1 segundo
             cleanup_interval=3600.0  # Limpa tarefas antigas a cada 1 hora
         )
