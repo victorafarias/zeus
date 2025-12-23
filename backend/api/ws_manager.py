@@ -26,6 +26,7 @@ class WebSocketManager:
     Permite:
     - Registrar conexões por conversa
     - Broadcast de mensagens para todos conectados em uma conversa
+    - Broadcast global para notificações de sistema
     - Gerenciamento automático de desconexões
     """
     
@@ -36,6 +37,9 @@ class WebSocketManager:
         
         # Mapa de WebSocket -> conversation_id (para cleanup rápido)
         self._ws_to_conversation: Dict[WebSocket, str] = {}
+        
+        # Mapa para rastrear todos os sockets ativos (para broadcast global)
+        self._all_sockets: Set[WebSocket] = set()
         
         # Lock para operações thread-safe
         self._lock = asyncio.Lock()
@@ -55,7 +59,7 @@ class WebSocketManager:
             conversation_id: ID da conversa
         """
         async with self._lock:
-            # Remove de conversa anterior se existir
+            # Remove de conversa anterior se existir (mas mantém no set global se já estiver)
             if websocket in self._ws_to_conversation:
                 old_conv_id = self._ws_to_conversation[websocket]
                 self._connections[old_conv_id].discard(websocket)
@@ -63,6 +67,7 @@ class WebSocketManager:
             # Registra na nova conversa
             self._connections[conversation_id].add(websocket)
             self._ws_to_conversation[websocket] = conversation_id
+            self._all_sockets.add(websocket)
         
         logger.debug(
             "WebSocket conectado à conversa",
@@ -91,6 +96,9 @@ class WebSocketManager:
                     "WebSocket desconectado da conversa",
                     conversation_id=conversation_id
                 )
+            
+            # Remove do set global
+            self._all_sockets.discard(websocket)
     
     async def switch_conversation(
         self,
@@ -98,16 +106,14 @@ class WebSocketManager:
         new_conversation_id: str
     ) -> None:
         """
-        Move uma conexão para uma conversa diferente.
-        
-        Útil quando o usuário muda de conversa sem reconectar.
+        Muda a conversa associada a um WebSocket.
         
         Args:
             websocket: Conexão WebSocket
-            new_conversation_id: ID da nova conversa
+            new_conversation_id: Novo ID de conversa
         """
         await self.connect(websocket, new_conversation_id)
-    
+
     async def broadcast_to_conversation(
         self,
         conversation_id: str,
@@ -118,68 +124,65 @@ class WebSocketManager:
         
         Args:
             conversation_id: ID da conversa
-            message: Mensagem a enviar (será convertida para JSON)
+            message: Mensagem a enviar
             
         Returns:
-            Número de conexões que receberam a mensagem
+            Número de conexões que receberam
         """
-        connections = self._connections.get(conversation_id, set()).copy()
-        
-        if not connections:
-            logger.debug(
-                "Nenhuma conexão ativa para broadcast",
-                conversation_id=conversation_id
-            )
+        if conversation_id not in self._connections:
             return 0
+            
+        return await self._broadcast_to_sockets(self._connections[conversation_id], message)
         
-        # Função auxiliar para envio individual seguro
-        async def send_to_socket(websocket: WebSocket) -> bool:
+    async def broadcast_globally(
+        self,
+        message: Dict[str, Any]
+    ) -> int:
+        """
+        Envia mensagem para TODAS as conexões ativas.
+        Útil para notificações de status que devem aparecer na sidebar independente da conversa atual.
+        
+        Args:
+            message: Mensagem a enviar
+            
+        Returns:
+            Número de conexões que receberam
+        """
+        if not self._all_sockets:
+            return 0
+            
+        return await self._broadcast_to_sockets(self._all_sockets, message)
+
+    async def _broadcast_to_sockets(
+        self,
+        sockets: Set[WebSocket],
+        message: Dict[str, Any]
+    ) -> int:
+        """Helper para broadcast para um conjunto de sockets"""
+        count = 0
+        dead_connections = set()
+        
+        # Copia para evitar erro de modificação durante iteração
+        connections = list(sockets)
+        
+        for websocket in connections:
             try:
                 if websocket.client_state == WebSocketState.CONNECTED:
                     await websocket.send_json(message)
-                    return True
-                return False
+                    count += 1
+                else:
+                    dead_connections.add(websocket)
             except Exception as e:
-                logger.warning(
-                    "Erro ao enviar broadcast",
-                    conversation_id=conversation_id,
-                    error=str(e)
-                )
-                return False
+                logger.warning(f"Erro no broadcast: {e}")
+                dead_connections.add(websocket)
         
-        # Enviar para todos em paralelo
-        results = await asyncio.gather(
-            *[send_to_socket(ws) for ws in connections],
-            return_exceptions=True
-        )
-        
-        sent_count = 0
-        failed_connections = []
-        
-        # Processar resultados
-        for websocket, result in zip(connections, results):
-            if isinstance(result, Exception) or result is False:
-                failed_connections.append(websocket)
-            else:
-                sent_count += 1
-        
-        # Remove conexões que falharam de forma assíncrona (sem bloquear retorno)
-        if failed_connections:
-            asyncio.create_task(self._cleanup_failed(failed_connections))
-            
-        logger.debug(
-            "Broadcast enviado",
-            conversation_id=conversation_id,
-            sent=sent_count,
-            failed=len(failed_connections)
-        )
-        
-        return sent_count
-        
-    async def _cleanup_failed(self, connections: List[WebSocket]):
-        """Remove conexões falhas em background"""
-        for ws in connections:
-            await self.disconnect(ws)
+        # Limpa conexões mortas
+        if dead_connections:
+            async with self._lock:
+                for ws in dead_connections:
+                    await self.disconnect(ws)
+                    
+        return count
     
     async def send_task_progress(
         self,
@@ -190,6 +193,7 @@ class WebSocketManager:
     ) -> int:
         """
         Envia atualização de progresso de uma tarefa.
+        Usa broadcast global para garantir que loaders na sidebar sejam atualizados.
         
         Args:
             conversation_id: ID da conversa
@@ -200,15 +204,16 @@ class WebSocketManager:
         Returns:
             Número de conexões que receberam
         """
-        return await self.broadcast_to_conversation(
-            conversation_id,
-            {
-                "type": "task_progress",
-                "task_id": task_id,
-                "message": message,
-                "step_type": step_type
-            }
-        )
+        payload = {
+            "type": "task_progress",
+            "task_id": task_id,
+            "conversation_id": conversation_id, # Importante para frontend filtrar
+            "message": message,
+            "step_type": step_type
+        }
+        
+        # Broadcast global para atualizar sidebar em outras conversas
+        return await self.broadcast_globally(payload)
     
     async def send_task_status(
         self,
@@ -221,6 +226,7 @@ class WebSocketManager:
     ) -> int:
         """
         Envia atualização de status de uma tarefa.
+        Usa broadcast global.
         
         Args:
             conversation_id: ID da conversa
@@ -236,6 +242,7 @@ class WebSocketManager:
         message = {
             "type": "task_status",
             "task_id": task_id,
+            "conversation_id": conversation_id, # Importante para frontend filtrar
             "status": status
         }
         
@@ -248,7 +255,8 @@ class WebSocketManager:
         if tool_calls is not None:
             message["tool_calls"] = tool_calls
         
-        return await self.broadcast_to_conversation(conversation_id, message)
+        # Broadcast global para atualizar sidebar em outras conversas
+        return await self.broadcast_globally(message)
     
     def get_connection_count(self, conversation_id: str) -> int:
         """
@@ -269,7 +277,7 @@ class WebSocketManager:
         Returns:
             Total de conexões
         """
-        return len(self._ws_to_conversation)
+        return len(self._all_sockets)
     
     def get_active_conversations(self) -> Set[str]:
         """

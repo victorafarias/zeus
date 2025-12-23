@@ -588,6 +588,13 @@ ol {
     height: 16px;
 }
 
+/* Em touch devices, sempre mostrar os botões de ação */
+@media (hover: none) {
+    .conversation-actions {
+        opacity: 1;
+    }
+}
+
 /* Loader de Processamento na Sidebar */
 .processing-loader {
     display: flex;

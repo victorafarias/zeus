@@ -174,6 +174,23 @@ function updateSidebarLoader(conversationId, processing) {
 
 
 /**
+ * Restaura loaders de todas as conversas que estão processando.
+ * Chamado após re-renderização da lista de conversas.
+ */
+function restoreAllProcessingLoaders() {
+    processingByConversation.forEach((isProcessing, conversationId) => {
+        if (isProcessing) {
+            updateSidebarLoader(conversationId, true);
+        }
+    });
+    console.log('[Chat] Loaders restaurados para conversas em processamento');
+}
+
+// Exportar função globalmente para uso em conversations.js
+window.restoreAllProcessingLoaders = restoreAllProcessingLoaders;
+
+
+/**
  * Atualiza logs da tool em execução
  * @param {string} output - Texto do log
  */
@@ -283,34 +300,55 @@ function handleWebSocketMessage(event) {
 
             case 'task_status':
                 // Atualização de status de tarefa
-                console.log('[Chat] Status da tarefa:', data.task_id, data.status);
-                if (data.status === 'completed') {
-                    hideTypingIndicator();
-                    hideCancelButton();
-                    if (data.result) {
-                        addMessage('assistant', data.result, data.tool_calls);
+                console.log('[Chat] Status da tarefa:', data.task_id, data.status, data.conversation_id);
+
+                // Sempre atualizar estado de processamento desta conversa específica
+                // Se completou ou falhou, não está mais processando
+                if (data.status === 'completed' || data.status === 'failed') {
+                    if (data.conversation_id) {
+                        setConversationProcessing(data.conversation_id, false);
                     }
-                    setConversationProcessing(getCurrentConversationId(), false);
-                    enableInput();
-                    // Recarregar conversa para pegar mensagens salvas
-                    Conversations.loadConversations();
-                } else if (data.status === 'failed') {
-                    hideTypingIndicator();
-                    hideCancelButton();
-                    addMessage('system', `❌ Erro no processamento: ${data.error || 'Erro desconhecido'}`);
-                    setConversationProcessing(getCurrentConversationId(), false);
-                    enableInput();
-                } else if (data.status === 'processing') {
-                    showTypingIndicator(`Processando tarefa...`);
-                } else if (data.status === 'pending') {
-                    showTypingIndicator(`Tarefa na fila de processamento...`);
+                }
+
+                // Só atualizar UI se for a conversa atual
+                const isCurrentConv = !data.conversation_id || data.conversation_id === getCurrentConversationId();
+
+                if (isCurrentConv) {
+                    if (data.status === 'completed') {
+                        hideTypingIndicator();
+                        hideCancelButton();
+                        if (data.result) {
+                            addMessage('assistant', data.result, data.tool_calls);
+                        }
+                        enableInput();
+                        // Recarregar conversa para pegar mensagens salvas
+                        Conversations.loadConversations();
+                    } else if (data.status === 'failed') {
+                        hideTypingIndicator();
+                        hideCancelButton();
+                        addMessage('system', `❌ Erro no processamento: ${data.error || 'Erro desconhecido'}`);
+                        enableInput();
+                    } else if (data.status === 'processing') {
+                        showTypingIndicator(`Processando tarefa...`);
+                    } else if (data.status === 'pending') {
+                        showTypingIndicator(`Tarefa na fila de processamento...`);
+                    }
                 }
                 break;
 
             case 'task_progress':
                 // Progresso de uma tarefa em execução
-                console.log('[Chat] Progresso da tarefa:', data.message);
-                showTypingIndicator(data.message);
+                console.log('[Chat] Progresso da tarefa:', data.message, data.conversation_id);
+
+                // Sempre marcar como processando se receber progresso
+                if (data.conversation_id) {
+                    setConversationProcessing(data.conversation_id, true);
+                }
+
+                // Só atualizar UI se for a conversa atual
+                if (!data.conversation_id || data.conversation_id === getCurrentConversationId()) {
+                    showTypingIndicator(data.message);
+                }
                 break;
 
             case 'pong':
@@ -587,6 +625,21 @@ function loadConversation(conversation) {
         });
     } else {
         showWelcomeScreen();
+    }
+
+    // Restaurar estado de interface baseado no processamento DESTA conversa específica
+    if (isConversationProcessing(conversation.id)) {
+        // Esta conversa está processando - mostrar indicadores
+        showTypingIndicator('Processando...');
+        showCancelButton();
+        disableInput();
+        console.log('[Chat] Conversa em processamento - indicadores restaurados');
+    } else {
+        // Esta conversa NÃO está processando - esconder indicadores e habilitar input
+        hideTypingIndicator();
+        hideCancelButton();
+        enableInput();
+        console.log('[Chat] Conversa não está processando - input habilitado');
     }
 
     // Fechar sidebar no mobile após selecionar conversa

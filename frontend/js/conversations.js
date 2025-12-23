@@ -274,6 +274,12 @@ function renderConversationsList() {
 
         list.appendChild(item);
     });
+
+    // Restaurar loaders de conversas que estão processando
+    // (O Chat.js gerencia o Map processingByConversation)
+    if (window.restoreAllProcessingLoaders) {
+        window.restoreAllProcessingLoaders();
+    }
 }
 
 
