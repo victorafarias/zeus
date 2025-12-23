@@ -2,36 +2,43 @@
  * =====================================================
  * ZEUS - Gerenciador de Modelos
  * Carrega e gerencia seleção de modelos OpenRouter
- * Suporta 3 instâncias: primário, secundário e terciário
+ * Suporta 3 instâncias: primário, secundário e Mago
  * =====================================================
  */
 
 // Cache de modelos carregados do servidor
 // modelsWithTools: apenas modelos com suporte a function calling (para 1ª e 2ª Instância)
-// allModels: todos os modelos disponíveis (para 3ª Instância)
+// allModels: todos os modelos disponíveis (para Mago)
 let modelsWithToolsCache = [];
 let allModelsCache = [];
 
 // Modelos selecionados para cada instância
-// Esses valores serão usados como fallback na ordem: 1ª → 2ª → 3ª
+// Esses valores serão usados como fallback na ordem: 1ª → 2ª → Mago
 let selectedModels = {
     primary: 'openai/gpt-4.1-nano',    // 1ª Instância
     secondary: 'openai/gpt-4.1-nano',  // 2ª Instância  
-    tertiary: 'openai/gpt-4.1-nano'    // 3ª Instância
+    mago: 'openai/gpt-4.1-nano'        // Mago (modelo poderoso)
 };
 
 // Referências aos elementos select
 let modelSelects = {
     primary: null,
     secondary: null,
-    tertiary: null
+    mago: null
+};
+
+// Referências aos campos de filtro
+let modelFilters = {
+    primary: null,
+    secondary: null,
+    mago: null
 };
 
 // Mapeamento de instância para chave
 const INSTANCE_MAP = {
     1: 'primary',
     2: 'secondary',
-    3: 'tertiary'
+    3: 'mago'
 };
 
 
@@ -75,14 +82,14 @@ async function loadAllModelLists() {
     // Carregar em paralelo para melhor performance
     const [withTools, all] = await Promise.all([
         loadModels(true),   // Apenas com tools (para 1ª e 2ª Instância)
-        loadModels(false)   // Todos os modelos (para 3ª Instância)
+        loadModels(false)   // Todos os modelos (para Mago)
     ]);
 
     modelsWithToolsCache = withTools;
     allModelsCache = all;
 
     console.log('[Models] Modelos com tools:', modelsWithToolsCache.length);
-    console.log('[Models] Todos os modelos:', allModelsCache.length);
+    console.log('[Models] Todos os modelos (Mago):', allModelsCache.length);
 
     return {
         withTools: modelsWithToolsCache,
@@ -134,8 +141,9 @@ function formatModelName(model) {
  * @param {HTMLSelectElement} selectElement - Elemento select a popular
  * @param {Array} models - Lista de modelos
  * @param {string} selectedValue - Valor previamente selecionado
+ * @param {string} filterText - Texto para filtrar modelos (opcional)
  */
-function renderModelOptions(selectElement, models, selectedValue) {
+function renderModelOptions(selectElement, models, selectedValue, filterText = '') {
     if (!selectElement) {
         return;
     }
@@ -143,14 +151,38 @@ function renderModelOptions(selectElement, models, selectedValue) {
     // Limpar opções existentes
     selectElement.innerHTML = '';
 
-    if (models.length === 0) {
-        selectElement.innerHTML = '<option value="">Nenhum modelo disponível</option>';
+    // Filtrar modelos se houver texto de filtro
+    let filteredModels = models;
+    if (filterText.trim()) {
+        const searchLower = filterText.toLowerCase();
+        filteredModels = models.filter(model => {
+            const modelName = (model.name || model.id).toLowerCase();
+            return modelName.includes(searchLower);
+        });
+
+        // Garantir que o modelo selecionado esteja na lista, mesmo se não der match no filtro
+        // Isso evita que o select mude valor "sozinho" visualmente
+        if (selectedValue) {
+            const isSelectedInList = filteredModels.some(m => m.id === selectedValue);
+            if (!isSelectedInList) {
+                // Buscar modelo completo na lista original
+                const selectedModelObj = models.find(m => m.id === selectedValue);
+                if (selectedModelObj) {
+                    // Adicionar no início para destaque
+                    filteredModels = [selectedModelObj, ...filteredModels];
+                }
+            }
+        }
+    }
+
+    if (filteredModels.length === 0) {
+        selectElement.innerHTML = '<option value="">Nenhum modelo encontrado</option>';
         return;
     }
 
     // Agrupar modelos por provedor para melhor organização
     const providers = {};
-    models.forEach(model => {
+    filteredModels.forEach(model => {
         const [provider] = model.id.split('/');
         if (!providers[provider]) {
             providers[provider] = [];
@@ -184,37 +216,88 @@ function renderModelOptions(selectElement, models, selectedValue) {
 /**
  * Renderiza todos os três seletores de modelo com os modelos carregados
  * 1ª e 2ª Instância: apenas modelos com suporte a tools (function calling)
- * 3ª Instância: todos os modelos disponíveis
+ * Mago: todos os modelos disponíveis
  * @param {Object} modelLists - Objeto com {withTools: Array, all: Array}
  */
 function renderAllModelSelectors(modelLists) {
     console.log('[Models] Renderizando seletores...');
     console.log('[Models] 1ª Instância:', selectedModels.primary);
     console.log('[Models] 2ª Instância:', selectedModels.secondary);
-    console.log('[Models] 3ª Instância:', selectedModels.tertiary);
+    console.log('[Models] Mago:', selectedModels.mago);
 
-    // Capturar referências aos elementos
+    // Capturar referências aos elementos select
     modelSelects.primary = document.getElementById('model-select-1');
     modelSelects.secondary = document.getElementById('model-select-2');
-    modelSelects.tertiary = document.getElementById('model-select-3');
+    modelSelects.mago = document.getElementById('model-select-3');
+
+    // Capturar referências aos campos de filtro
+    modelFilters.primary = document.getElementById('model-filter-1');
+    modelFilters.secondary = document.getElementById('model-filter-2');
+    modelFilters.mago = document.getElementById('model-filter-3');
 
     // 1ª e 2ª Instância: apenas modelos com suporte a tools
     // (necessário para o agente funcionar corretamente com tool calling)
     renderModelOptions(modelSelects.primary, modelLists.withTools, selectedModels.primary);
     renderModelOptions(modelSelects.secondary, modelLists.withTools, selectedModels.secondary);
 
-    // 3ª Instância: todos os modelos (fallback final, pode não usar tools)
-    renderModelOptions(modelSelects.tertiary, modelLists.all, selectedModels.tertiary);
+    // Mago: todos os modelos (modelo mais poderoso, usado em situações especiais)
+    renderModelOptions(modelSelects.mago, modelLists.all, selectedModels.mago);
 
-    // Adicionar event listeners para mudanças
+    // Adicionar event listeners para mudanças de seleção
     if (modelSelects.primary) {
         modelSelects.primary.addEventListener('change', (e) => handleModelChange(1, e.target.value));
     }
     if (modelSelects.secondary) {
         modelSelects.secondary.addEventListener('change', (e) => handleModelChange(2, e.target.value));
     }
-    if (modelSelects.tertiary) {
-        modelSelects.tertiary.addEventListener('change', (e) => handleModelChange(3, e.target.value));
+    if (modelSelects.mago) {
+        modelSelects.mago.addEventListener('change', (e) => handleModelChange(3, e.target.value));
+    }
+
+    // Adicionar event listeners para filtros
+    setupModelFilters(modelLists);
+}
+
+
+/**
+ * Configura os event listeners dos campos de filtro
+ * @param {Object} modelLists - Listas de modelos {withTools, all}
+ */
+function setupModelFilters(modelLists) {
+    // Filtro para 1ª Instância
+    if (modelFilters.primary) {
+        modelFilters.primary.addEventListener('input', (e) => {
+            renderModelOptions(
+                modelSelects.primary,
+                modelLists.withTools,
+                selectedModels.primary,
+                e.target.value
+            );
+        });
+    }
+
+    // Filtro para 2ª Instância
+    if (modelFilters.secondary) {
+        modelFilters.secondary.addEventListener('input', (e) => {
+            renderModelOptions(
+                modelSelects.secondary,
+                modelLists.withTools,
+                selectedModels.secondary,
+                e.target.value
+            );
+        });
+    }
+
+    // Filtro para Mago
+    if (modelFilters.mago) {
+        modelFilters.mago.addEventListener('input', (e) => {
+            renderModelOptions(
+                modelSelects.mago,
+                modelLists.all,
+                selectedModels.mago,
+                e.target.value
+            );
+        });
     }
 }
 
@@ -275,8 +358,11 @@ function loadModelsFromStorage() {
             if (parsed.secondary) {
                 selectedModels.secondary = parsed.secondary;
             }
-            if (parsed.tertiary) {
-                selectedModels.tertiary = parsed.tertiary;
+            // Compatibilidade: aceitar tanto 'tertiary' (antigo) quanto 'mago' (novo)
+            if (parsed.mago) {
+                selectedModels.mago = parsed.mago;
+            } else if (parsed.tertiary) {
+                selectedModels.mago = parsed.tertiary;
             }
 
             console.log('[Models] Modelos carregados do localStorage');
@@ -290,13 +376,13 @@ function loadModelsFromStorage() {
 /**
  * Retorna os modelos atualmente selecionados
  * Usado pelo chat.js para enviar ao backend
- * @returns {object} Objeto com primary, secondary e tertiary
+ * @returns {object} Objeto com primary, secondary e mago
  */
 function getSelectedModels() {
     return {
         primary: selectedModels.primary,
         secondary: selectedModels.secondary,
-        tertiary: selectedModels.tertiary
+        mago: selectedModels.mago
     };
 }
 
@@ -344,7 +430,7 @@ async function initModels() {
 
     // Carregar ambas as listas de modelos do servidor
     // - withTools: para 1ª e 2ª Instância (necessário para tool calling)
-    // - all: para 3ª Instância (fallback final)
+    // - all: para Mago (modelo poderoso)
     const modelLists = await loadAllModelLists();
 
     // Renderizar todos os seletores com as listas apropriadas

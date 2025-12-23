@@ -1,8 +1,9 @@
 """
 
 =====================================================
-ZEUS - Tool para Chamar Modelos Externos (OpenRouter)
+ZEUS - Tool para Chamar Modelos Externos (Mago)
 Permite ao orquestrador local delegar tarefas complexas
+ao modelo mais poderoso selecionado no "Mago"
 =====================================================
 """
 
@@ -16,32 +17,34 @@ logger = get_logger(__name__)
 
 class ExternalModelTool(BaseTool):
     """
-    Tool para chamar modelos externos via OpenRouter.
+    Tool para chamar o modelo do Mago via OpenRouter.
     
-    Usada quando o orquestrador local (Llama 3.1) precisa de:
-    - Raciocínio mais complexo
-    - Conhecimento especializado
-    - Tarefas criativas avançadas
+    O Mago é o modelo mais poderoso selecionado pelo usuário,
+    usado apenas quando tarefas requerem inteligência superior
+    ou como última tentativa para resolver problemas complexos.
     """
     
     name = "call_external_model"
-    description = """Chama um modelo de IA externo mais poderoso (GPT-4, Claude, etc) para tarefas complexas.
+    description = """Chama o modelo do Mago (modelo mais poderoso configurado) para tarefas complexas.
 Use APENAS quando a tarefa requer:
 - Raciocínio lógico muito complexo ou matemática avançada
 - Análise profunda de código ou debugging difícil
 - Escrita criativa de alta qualidade
 - Conhecimento técnico especializado que você não possui
+- Última tentativa após outras abordagens falharem
 
 NÃO use para:
 - Tarefas simples que você pode resolver
 - Execução de comandos ou operações com arquivos
-- Busca em RAG ou operações locais"""
+- Busca em RAG ou operações locais
+
+IMPORTANTE: Este modelo é o mais caro, use com moderação."""
 
     parameters = [
         ToolParameter(
             name="task_description",
             type="string",
-            description="Descrição clara e detalhada da tarefa para o modelo externo",
+            description="Descrição clara e detalhada da tarefa para o Mago",
             required=True
         ),
         ToolParameter(
@@ -49,55 +52,45 @@ NÃO use para:
             type="string",
             description="Contexto adicional relevante (código, dados, histórico)",
             required=False
-        ),
-        ToolParameter(
-            name="model_preference",
-            type="string",
-            description="Preferência de modelo: 'gpt4' para lógica/código, 'claude' para escrita/análise, 'auto' para automático",
-            required=False,
-            enum=["gpt4", "claude", "auto"]
         )
     ]
     
-    # Mapeamento de preferências para modelos
-    MODEL_MAP = {
-        "gpt4": "openai/gpt-4o",
-        "claude": "anthropic/claude-3.5-sonnet",
-        "auto": "openai/gpt-4o"  # Padrão
-    }
+    # Modelo padrão de fallback caso não seja injetado pelo orquestrador
+    DEFAULT_MODEL = "anthropic/claude-3.5-sonnet"
     
     async def execute(
         self,
         task_description: str,
         context: str = "",
-        model_preference: str = "auto",
+        mago_model: str = None,  # Injetado pelo orquestrador
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Executa chamada para modelo externo.
+        Executa chamada para o modelo do Mago.
         
         Args:
             task_description: Descrição da tarefa
             context: Contexto adicional
-            model_preference: Qual modelo preferir
+            mago_model: Modelo do Mago (injetado pelo orquestrador)
             
         Returns:
-            Resposta do modelo externo
+            Resposta do modelo Mago
         """
         try:
+            # Usar modelo injetado ou fallback para o padrão
+            model = mago_model or self.DEFAULT_MODEL
+            
             logger.info(
-                "Chamando modelo externo",
-                preference=model_preference,
+                "Chamando modelo do Mago",
+                model=model,
                 task_length=len(task_description)
             )
             
-            # Selecionar modelo
-            model = self.MODEL_MAP.get(model_preference, self.MODEL_MAP["auto"])
-            
             # Construir prompt
-            system_prompt = """Você é um assistente especializado sendo consultado por outro agente de IA.
-Responda de forma direta e técnica. O agente que te chamou precisa de ajuda com uma tarefa específica.
-Forneça a resposta mais útil e completa possível."""
+            system_prompt = """Você é o Mago, um modelo de IA extremamente poderoso sendo consultado por outro agente de IA.
+Sua expertise está sendo requisitada para uma tarefa complexa que requer inteligência superior.
+Responda de forma direta e técnica. Forneça a resposta mais útil e completa possível.
+Lembre-se: você foi chamado porque a tarefa é desafiadora - demonstre todo seu potencial."""
 
             user_prompt = task_description
             if context:
@@ -121,7 +114,7 @@ Forneça a resposta mais útil e completa possível."""
             result_content = response.get("content", "")
             
             logger.info(
-                "Resposta do modelo externo recebida",
+                "Resposta do Mago recebida",
                 model=model,
                 response_length=len(result_content)
             )
@@ -134,12 +127,12 @@ Forneça a resposta mais útil e completa possível."""
             
         except Exception as e:
             logger.error(
-                "Erro ao chamar modelo externo",
+                "Erro ao chamar modelo do Mago",
                 error=str(e)
             )
             return {
                 "success": False,
-                "error": f"Falha ao consultar modelo externo: {str(e)}"
+                "error": f"Falha ao consultar o Mago: {str(e)}"
             }
 
 

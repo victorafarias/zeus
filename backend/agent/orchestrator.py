@@ -43,8 +43,8 @@ class AgentOrchestrator:
     Orquestrador principal do agente Zeus.
     
     Gerencia:
-    - Comunicação com OpenRouter (modelos 1ª, 2ª e 3ª Instância)
-    - Fallback automático entre modelos: 1ª → 2ª → 3ª Instância
+    - Comunicação com OpenRouter (modelos 1ª, 2ª Instância e Mago)
+    - Fallback automático entre modelos: 1ª → 2ª → Mago
     - Execução de tools
     - Ciclo de tool calling (múltiplas iterações)
     """
@@ -57,18 +57,18 @@ class AgentOrchestrator:
         # Modelos padrão (usados se não fornecidos via frontend)
         self.default_primary_model = settings.primary_model
         self.default_secondary_model = settings.secondary_model
-        self.default_tertiary_model = settings.secondary_model  # Usar secundário como fallback
+        self.default_mago_model = settings.secondary_model  # Mago: modelo poderoso
         
         # Timeouts para cada nível
         self.primary_timeout = settings.primary_model_timeout
         self.secondary_timeout = settings.secondary_model_timeout
-        self.tertiary_timeout = settings.secondary_model_timeout  # Mesmo timeout do secundário
+        self.mago_timeout = settings.secondary_model_timeout  # Mesmo timeout do secundário
         
         logger.info(
             "Orquestrador inicializado",
             default_primary=self.default_primary_model,
             default_secondary=self.default_secondary_model,
-            default_tertiary=self.default_tertiary_model,
+            default_mago=self.default_mago_model,
             tools_count=len(self.tools)
         )
     
@@ -227,17 +227,17 @@ class AgentOrchestrator:
         """
         Processa uma mensagem do usuário e retorna resposta.
         
-        Implementa o ciclo de tool calling com fallback 1ª → 2ª → 3ª Instância:
+        Implementa o ciclo de tool calling com fallback 1ª → 2ª → Mago:
         1. Envia mensagem para o modelo da 1ª Instância
         2. Se falhar, tenta 2ª Instância
-        3. Se falhar, tenta 3ª Instância
+        3. Se falhar, tenta Mago
         4. Se modelo solicitar tool, executa e envia resultado
         5. Repete até resposta final
         
         Args:
             conversation: Objeto Conversation com mensagens
             websocket: WebSocket para enviar atualizações em tempo real
-            custom_models: Modelos customizados {primary, secondary, tertiary}
+            custom_models: Modelos customizados {primary, secondary, mago}
             cancel_state: Estado de cancelamento compartilhado {cancelled: bool, active_process: processo}
             progress_callback: Callback para enviar progresso (para background worker)
                                Assinatura: async def callback(message: str, step_type: str)
@@ -249,14 +249,14 @@ class AgentOrchestrator:
         models = custom_models or {}
         primary_model = models.get("primary", self.default_primary_model)
         secondary_model = models.get("secondary", self.default_secondary_model)
-        tertiary_model = models.get("tertiary", self.default_tertiary_model)
+        mago_model = models.get("mago", self.default_mago_model)
         
         logger.info(
             "Processando mensagem",
             conversation_id=conversation.id,
             primary_model=primary_model,
             secondary_model=secondary_model,
-            tertiary_model=tertiary_model
+            mago_model=mago_model
         )
         
         # Buscar contexto do RAG
@@ -356,30 +356,30 @@ class AgentOrchestrator:
                 if response:
                     logger.info("Resposta da 2ª Instância recebida", model=secondary_model)
                 else:
-                    # Falha na 2ª Instância → Tentar 3ª Instância
+                    # Falha na 2ª Instância → Tentar Mago
                     logger.warning(
-                        "Falha na 2ª Instância, tentando 3ª Instância",
+                        "Falha na 2ª Instância, tentando Mago",
                         secondary_model=secondary_model,
-                        tertiary_model=tertiary_model
+                        mago_model=mago_model
                     )
                     await self._send_log_feedback(
                         websocket,
-                        f"Erro em {secondary_model}, tentando 3ª Instância ({tertiary_model})",
+                        f"Erro em {secondary_model}, tentando Mago ({mago_model})",
                         progress_callback
                     )
                     
                     response = await self._call_model_with_retry(
-                        model=tertiary_model,
+                        model=mago_model,
                         messages=messages,
                         tools=self.tools if self.tools else None,
-                        timeout=self.tertiary_timeout
+                        timeout=self.mago_timeout
                     )
                     
                     if response:
-                        logger.info("Resposta da 3ª Instância recebida", model=tertiary_model)
+                        logger.info("Resposta do Mago recebida", model=mago_model)
                     else:
                         # Falha total em todas as instâncias
-                        error_msg = f"Erro: Todos os modelos falharam (1ª: {primary_model}, 2ª: {secondary_model}, 3ª: {tertiary_model})"
+                        error_msg = f"Erro: Todos os modelos falharam (1ª: {primary_model}, 2ª: {secondary_model}, Mago: {mago_model})"
                         logger.error("Falha em todas as instâncias")
                         await self._send_log_feedback(websocket, "Erro: Falha em todas as instâncias", progress_callback, "error")
                         await self.cleanup_resources(conversation.id)
@@ -515,6 +515,10 @@ class AgentOrchestrator:
                     # INJETAR SESSION_ID para isolamento
                     if conversation.id:
                         tool_args["session_id"] = conversation.id
+                    
+                    # INJETAR MODELO DO MAGO para a tool call_external_model
+                    if tool_name == "call_external_model":
+                        tool_args["mago_model"] = mago_model
 
                     # Heartbeat task para feedback constante
                     async def heartbeat(ws):

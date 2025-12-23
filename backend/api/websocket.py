@@ -228,13 +228,13 @@ async def websocket_chat(
                 # Extrair arquivos anexados
                 attached_files = message_data.get("attached_files", [])
                 
-                # Extrair modelos customizados do frontend (1ª, 2ª e 3ª Instância)
+                # Extrair modelos customizados do frontend (1ª, 2ª Instância e Mago)
                 # Se não fornecidos, usa os valores padrão do config
                 models_data = message_data.get("models", {})
                 custom_models = {
                     "primary": models_data.get("primary", settings.primary_model),
                     "secondary": models_data.get("secondary", settings.secondary_model),
-                    "tertiary": models_data.get("tertiary", settings.secondary_model)
+                    "mago": models_data.get("mago", settings.secondary_model)
                 }
                 
                 if not content and not attached_files:
