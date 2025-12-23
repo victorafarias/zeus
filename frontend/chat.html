@@ -139,7 +139,12 @@
                         <li>🎙️ Transcrever áudio e vídeo</li>
                         <li>📁 Ler e criar arquivos</li>
                     </ul>
-                    <p class="welcome-hint">Digite uma mensagem para começar...</p>
+                    <!-- Hint para desktop -->
+                    <p class="welcome-hint desktop-only">Digite uma mensagem para começar...</p>
+                    <!-- Botão para mobile -->
+                    <button class="btn-select-models mobile-only" id="btn-open-models-modal">
+                        🧙 Selecionar Modelos
+                    </button>
                 </div>
             </div>
 
@@ -221,6 +226,51 @@
                     <pre class="tool-logs" id="tool-logs"
                         style="font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; margin: 0; color: #aaa;"></pre>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================= -->
+    <!-- Modal de Seleção de Modelos (Mobile) -->
+    <!-- ========================================= -->
+    <div class="modal-overlay" id="models-modal" hidden>
+        <div class="modal models-modal">
+            <div class="modal-header">
+                <h3>🧙 Selecionar Modelos</h3>
+                <button class="modal-close" id="btn-close-models-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- 1ª Instância -->
+                <div class="modal-model-item">
+                    <label for="modal-model-select-1">1ª Instância</label>
+                    <input type="text" id="modal-model-filter-1" class="model-filter" placeholder="Filtrar modelos...">
+                    <select id="modal-model-select-1">
+                        <option value="">Carregando...</option>
+                    </select>
+                </div>
+
+                <!-- 2ª Instância -->
+                <div class="modal-model-item">
+                    <label for="modal-model-select-2">2ª Instância</label>
+                    <input type="text" id="modal-model-filter-2" class="model-filter" placeholder="Filtrar modelos...">
+                    <select id="modal-model-select-2">
+                        <option value="">Carregando...</option>
+                    </select>
+                </div>
+
+                <!-- Mago -->
+                <div class="modal-model-item">
+                    <label for="modal-model-select-3">🧙 Mago</label>
+                    <input type="text" id="modal-model-filter-3" class="model-filter" placeholder="Filtrar modelos...">
+                    <select id="modal-model-select-3">
+                        <option value="">Carregando...</option>
+                    </select>
+                </div>
+
+                <!-- Botão de Confirmar -->
+                <button class="btn-confirm-models" id="btn-confirm-models">
+                    Selecionar
+                </button>
             </div>
         </div>
     </div>

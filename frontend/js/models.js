@@ -436,7 +436,171 @@ async function initModels() {
     // Renderizar todos os seletores com as listas apropriadas
     renderAllModelSelectors(modelLists);
 
+    // Inicializar modal mobile
+    initModelsModal(modelLists);
+
     console.log('[Models] Inicialização concluída');
+}
+
+
+// =====================================================
+// MODAL DE SELEÇÃO DE MODELOS (MOBILE)
+// =====================================================
+
+// Referências aos elementos do modal
+let modalSelects = {
+    primary: null,
+    secondary: null,
+    mago: null
+};
+
+let modalFilters = {
+    primary: null,
+    secondary: null,
+    mago: null
+};
+
+/**
+ * Inicializa o modal de seleção de modelos para mobile
+ * @param {Object} modelLists - Listas de modelos {withTools, all}
+ */
+function initModelsModal(modelLists) {
+    const modal = document.getElementById('models-modal');
+    const btnOpen = document.getElementById('btn-open-models-modal');
+    const btnClose = document.getElementById('btn-close-models-modal');
+    const btnConfirm = document.getElementById('btn-confirm-models');
+
+    if (!modal || !btnOpen) {
+        console.log('[Models] Modal mobile não encontrado na página');
+        return;
+    }
+
+    // Capturar referências aos selects do modal
+    modalSelects.primary = document.getElementById('modal-model-select-1');
+    modalSelects.secondary = document.getElementById('modal-model-select-2');
+    modalSelects.mago = document.getElementById('modal-model-select-3');
+
+    // Capturar referências aos filtros do modal
+    modalFilters.primary = document.getElementById('modal-model-filter-1');
+    modalFilters.secondary = document.getElementById('modal-model-filter-2');
+    modalFilters.mago = document.getElementById('modal-model-filter-3');
+
+    // Popular selects do modal
+    renderModelOptions(modalSelects.primary, modelLists.withTools, selectedModels.primary);
+    renderModelOptions(modalSelects.secondary, modelLists.withTools, selectedModels.secondary);
+    renderModelOptions(modalSelects.mago, modelLists.all, selectedModels.mago);
+
+    // Configurar filtros do modal
+    setupModalFilters(modelLists);
+
+    // Event: Abrir modal
+    btnOpen.addEventListener('click', () => {
+        // Sincronizar valores do modal com os valores atuais
+        if (modalSelects.primary) modalSelects.primary.value = selectedModels.primary;
+        if (modalSelects.secondary) modalSelects.secondary.value = selectedModels.secondary;
+        if (modalSelects.mago) modalSelects.mago.value = selectedModels.mago;
+
+        modal.hidden = false;
+        modal.style.display = 'flex';
+    });
+
+    // Event: Fechar modal (botão X)
+    if (btnClose) {
+        btnClose.addEventListener('click', () => {
+            modal.hidden = true;
+            modal.style.display = 'none';
+        });
+    }
+
+    // Event: Fechar modal (clique no overlay)
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.hidden = true;
+            modal.style.display = 'none';
+        }
+    });
+
+    // Event: Confirmar seleção
+    if (btnConfirm) {
+        btnConfirm.addEventListener('click', () => {
+            // Ler valores dos selects do modal
+            const newPrimary = modalSelects.primary?.value || selectedModels.primary;
+            const newSecondary = modalSelects.secondary?.value || selectedModels.secondary;
+            const newMago = modalSelects.mago?.value || selectedModels.mago;
+
+            // Atualizar estado global
+            selectedModels.primary = newPrimary;
+            selectedModels.secondary = newSecondary;
+            selectedModels.mago = newMago;
+
+            // Sincronizar com selects do header (se existirem)
+            if (modelSelects.primary) modelSelects.primary.value = newPrimary;
+            if (modelSelects.secondary) modelSelects.secondary.value = newSecondary;
+            if (modelSelects.mago) modelSelects.mago.value = newMago;
+
+            // Salvar no localStorage
+            saveModelsToStorage();
+
+            // Emitir evento de mudança
+            window.dispatchEvent(new CustomEvent('modelsChanged', {
+                detail: {
+                    instance: 'all',
+                    allModels: selectedModels
+                }
+            }));
+
+            // Fechar modal
+            modal.hidden = true;
+            modal.style.display = 'none';
+
+            console.log('[Models] Modelos selecionados via modal:', selectedModels);
+        });
+    }
+
+    console.log('[Models] Modal mobile inicializado');
+}
+
+
+/**
+ * Configura os event listeners dos filtros do modal
+ * @param {Object} modelLists - Listas de modelos {withTools, all}
+ */
+function setupModalFilters(modelLists) {
+    // Filtro para 1ª Instância (modal)
+    if (modalFilters.primary) {
+        modalFilters.primary.addEventListener('input', (e) => {
+            renderModelOptions(
+                modalSelects.primary,
+                modelLists.withTools,
+                selectedModels.primary,
+                e.target.value
+            );
+        });
+    }
+
+    // Filtro para 2ª Instância (modal)
+    if (modalFilters.secondary) {
+        modalFilters.secondary.addEventListener('input', (e) => {
+            renderModelOptions(
+                modalSelects.secondary,
+                modelLists.withTools,
+                selectedModels.secondary,
+                e.target.value
+            );
+        });
+    }
+
+    // Filtro para Mago (modal)
+    if (modalFilters.mago) {
+        modalFilters.mago.addEventListener('input', (e) => {
+            renderModelOptions(
+                modalSelects.mago,
+                modelLists.all,
+                selectedModels.mago,
+                e.target.value
+            );
+        });
+    }
 }
 
 
