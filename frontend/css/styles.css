@@ -589,7 +589,24 @@ ol {
 }
 
 /* Em touch devices, sempre mostrar os botões de ação */
+/* Usa hover: none para detectar dispositivos touch */
 @media (hover: none) {
+    .conversation-actions {
+        opacity: 1;
+    }
+
+    .conversation-actions button {
+        color: var(--color-text-secondary);
+    }
+
+    .conversation-actions svg {
+        fill: currentColor;
+    }
+}
+
+/* Fallback para dispositivos móveis baseado em largura de tela */
+/* Garante compatibilidade com navegadores que não suportam hover: none */
+@media (max-width: 768px) {
     .conversation-actions {
         opacity: 1;
     }
