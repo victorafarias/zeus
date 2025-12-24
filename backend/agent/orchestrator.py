@@ -623,6 +623,22 @@ class AgentOrchestrator:
                         "args": tool_args,
                         "result": tool_result[:500]
                     })
+            
+            # Se finish_task foi executada, encerrar o loop imediatamente
+            if is_finished:
+                logger.info(
+                    "finish_task executada - encerrando loop",
+                    iteration=iteration
+                )
+                await self._send_log_feedback(websocket, "Tarefa finalizada com sucesso", progress_callback)
+                
+                # Retornar o resultado do finish_task como resposta final
+                # O tool_result mais recente será da finish_task
+                await self.cleanup_resources(conversation.id)
+                return {
+                    "content": tool_result,  # Resultado do finish_task
+                    "role": "assistant"
+                }
         
         # Salvar procedimentos executados no RAG (após loop)
         if executed_procedures and rag:
@@ -635,9 +651,6 @@ class AgentOrchestrator:
                         solution=proc['result'],
                         tool_used=proc['tool']
                     )
-            except Exception as e:
-                logger.warning("Erro ao salvar procedimentos no RAG", error=str(e))
-        
             except Exception as e:
                 logger.warning("Erro ao salvar procedimentos no RAG", error=str(e))
         
