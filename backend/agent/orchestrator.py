@@ -632,11 +632,17 @@ class AgentOrchestrator:
                 )
                 await self._send_log_feedback(websocket, "Tarefa finalizada com sucesso", progress_callback)
                 
-                # Retornar o resultado do finish_task como resposta final
-                # O tool_result mais recente será da finish_task
+                # Retornar o conteúdo completo da resposta do modelo
+                # O content da response contém o texto completo gerado pelo modelo
+                # (não usar tool_result que pode estar truncado)
+                final_content = response.get("content", "")
+                if not final_content:
+                    # Se não houver content, usar o tool_result como fallback
+                    final_content = tool_result
+                
                 await self.cleanup_resources(conversation.id)
                 return {
-                    "content": tool_result,  # Resultado do finish_task
+                    "content": final_content,
                     "role": "assistant"
                 }
         
