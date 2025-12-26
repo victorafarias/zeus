@@ -222,7 +222,8 @@ class WebSocketManager:
         status: str,
         result: Optional[str] = None,
         error: Optional[str] = None,
-        tool_calls: Optional[list] = None
+        tool_calls: Optional[list] = None,
+        execution_time: Optional[float] = None
     ) -> int:
         """
         Envia atualização de status de uma tarefa.
@@ -235,6 +236,7 @@ class WebSocketManager:
             result: Resultado (se completed)
             error: Erro (se failed)
             tool_calls: Tool calls executadas
+            execution_time: Tempo de execução em segundos
             
         Returns:
             Número de conexões que receberam
@@ -255,8 +257,13 @@ class WebSocketManager:
         if tool_calls is not None:
             message["tool_calls"] = tool_calls
         
+        # Tempo de execução: importante para exibir ao usuário
+        if execution_time is not None:
+            message["execution_time"] = round(execution_time, 2)
+        
         # Broadcast global para atualizar sidebar em outras conversas
         return await self.broadcast_globally(message)
+
     
     def get_connection_count(self, conversation_id: str) -> int:
         """

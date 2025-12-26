@@ -1265,6 +1265,29 @@ ol {
     list-style: decimal;
 }
 
+/* Badge de Tempo de Execução */
+.execution-time-badge {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.35rem;
+    margin-top: 0.75rem;
+    padding: 0.35rem 0.65rem;
+    background: rgba(99, 102, 241, 0.15);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: var(--color-accent-primary);
+    font-weight: 500;
+    width: fit-content;
+    margin-left: auto;
+}
+
+.execution-time-badge svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
 
 /* ============================================
    INDICADOR DE DIGITAÇÃO

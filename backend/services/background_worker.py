@@ -202,6 +202,9 @@ class BackgroundWorker:
         Args:
             task: Tarefa a processar
         """
+        import time
+        start_time = time.time()  # Captura tempo de início para medir execução
+        
         logger.info(
             "Iniciando processamento de tarefa",
             task_id=task.id,
@@ -275,12 +278,16 @@ class BackgroundWorker:
             # Marca tarefa como concluída
             result_content = response.get("content", "")
             
+            # Calcular tempo de execução
+            execution_time = time.time() - start_time
+            
             # Log para depuração
             logger.info(
                 "Resposta do orquestrador para envio",
                 content_length=len(result_content) if result_content else 0,
                 has_content=bool(result_content),
-                content_preview=result_content[:200] if result_content else "(vazio)"
+                content_preview=result_content[:200] if result_content else "(vazio)",
+                execution_time_seconds=round(execution_time, 2)
             )
             
             await self._task_queue.update_task_status(
@@ -290,18 +297,20 @@ class BackgroundWorker:
                 tool_calls=response.get("tool_calls")
             )
             
-            # Notifica clientes
+            # Notifica clientes (incluindo tempo de execução)
             await self._ws_manager.send_task_status(
                 task.conversation_id,
                 task.id,
                 TaskStatus.COMPLETED.value,
                 result=result_content,
-                tool_calls=response.get("tool_calls")
+                tool_calls=response.get("tool_calls"),
+                execution_time=execution_time  # Tempo em segundos
             )
             
             logger.info(
                 "Tarefa processada com sucesso",
-                task_id=task.id
+                task_id=task.id,
+                execution_time=f"{execution_time:.2f}s"
             )
             
         except Exception as e:

@@ -25,6 +25,20 @@ let connectionStatus = null;
 
 
 /**
+ * Formata o tempo de execução em formato legível
+ * @param {number} seconds - Tempo em segundos
+ * @returns {string} Tempo formatado (ex: "2.5s", "1m 30s")
+ */
+function formatExecutionTime(seconds) {
+    if (seconds < 60) {
+        return `${seconds.toFixed(1)}s`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.round(seconds % 60);
+    return `${minutes}m ${remainingSeconds}s`;
+}
+
+/**
  * Conecta ao WebSocket do servidor
  * @param {string} conversationId - ID da conversa (opcional)
  */
@@ -318,7 +332,8 @@ function handleWebSocketMessage(event) {
                         hideTypingIndicator();
                         hideCancelButton();
                         if (data.result) {
-                            addMessage('assistant', data.result, data.tool_calls);
+                            // Passar tempo de execução se disponível
+                            addMessage('assistant', data.result, data.tool_calls, data.execution_time);
                         }
                         enableInput();
                         // Recarregar conversa para pegar mensagens salvas
@@ -461,8 +476,9 @@ function sendMessage(content) {
  * @param {string} role - 'user', 'assistant', ou 'system'
  * @param {string} content - Conteúdo da mensagem
  * @param {Array} toolCalls - Tool calls (opcional)
+ * @param {number} executionTime - Tempo de execução em segundos (opcional)
  */
-function addMessage(role, content, toolCalls = null) {
+function addMessage(role, content, toolCalls = null, executionTime = null) {
     if (!messagesDiv) return;
 
     const message = document.createElement('div');
@@ -504,6 +520,21 @@ function addMessage(role, content, toolCalls = null) {
         <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
     </svg>`;
 
+    // Badge de tempo de execução (somente para assistente e quando tiver tempo)
+    let executionTimeBadge = '';
+    if (role === 'assistant' && executionTime !== null && executionTime !== undefined) {
+        const formattedTime = formatExecutionTime(executionTime);
+        executionTimeBadge = `
+            <div class="execution-time-badge" title="Tempo de processamento">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
+                </svg>
+                <span>${formattedTime}</span>
+            </div>
+        `;
+        console.log('[Chat] Tempo de execução:', formattedTime);
+    }
+
     message.innerHTML = `
         <div class="message-avatar">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
@@ -516,6 +547,7 @@ function addMessage(role, content, toolCalls = null) {
                 <span class="message-time">${time}</span>
             </div>
             <div class="message-body">${renderedContent}</div>
+            ${executionTimeBadge}
         </div>
         <button class="btn-copy-message" title="Copiar texto">
             ${copyIcon}
