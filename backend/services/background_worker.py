@@ -273,10 +273,20 @@ class BackgroundWorker:
             save_conversation(conversation)
             
             # Marca tarefa como concluída
+            result_content = response.get("content", "")
+            
+            # Log para depuração
+            logger.info(
+                "Resposta do orquestrador para envio",
+                content_length=len(result_content) if result_content else 0,
+                has_content=bool(result_content),
+                content_preview=result_content[:200] if result_content else "(vazio)"
+            )
+            
             await self._task_queue.update_task_status(
                 task.id,
                 TaskStatus.COMPLETED,
-                result=response.get("content", ""),
+                result=result_content,
                 tool_calls=response.get("tool_calls")
             )
             
@@ -285,7 +295,7 @@ class BackgroundWorker:
                 task.conversation_id,
                 task.id,
                 TaskStatus.COMPLETED.value,
-                result=response.get("content", ""),
+                result=result_content,
                 tool_calls=response.get("tool_calls")
             )
             

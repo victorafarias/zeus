@@ -636,9 +636,31 @@ class AgentOrchestrator:
                 # O content da response contém o texto completo gerado pelo modelo
                 # (não usar tool_result que pode estar truncado)
                 final_content = response.get("content", "")
+                
+                # Log para depuração
+                logger.info(
+                    "Conteúdo final para retorno",
+                    has_response_content=bool(final_content),
+                    response_content_length=len(final_content) if final_content else 0,
+                    tool_result_length=len(tool_result) if tool_result else 0
+                )
+                
                 if not final_content:
                     # Se não houver content, usar o tool_result como fallback
                     final_content = tool_result
+                    logger.info("Usando tool_result como fallback", content_length=len(final_content) if final_content else 0)
+                
+                if not final_content:
+                    # Último fallback: usar o argumento result do finish_task
+                    logger.warning("Content e tool_result vazios, extraindo result do finish_task")
+                    for tc in tool_calls:
+                        if tc["function"]["name"] == "finish_task":
+                            try:
+                                args = json.loads(tc["function"]["arguments"])
+                                final_content = args.get("result", "Tarefa concluída.")
+                                break
+                            except:
+                                pass
                 
                 await self.cleanup_resources(conversation.id)
                 return {
